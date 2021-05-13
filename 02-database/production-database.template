@@ -1,0 +1,679 @@
+---
+# region TEMPLATE INFO
+
+# RELATIONAL DATABASE SERVICE:
+# This CloudFormation template creates a MySQL 8 master database, and an optional read replica.
+
+# TODO ELASTICACHE:
+# This CloudFormation template creates a Redis cluster...
+
+# EXPECTED EXISTING RESOURCES:
+# - CloudFormation production environment Stack
+# - RDS MySQL Parameter Group (configurable, optional)
+# - ElastiCache Redis Parameter Group (configurable, optional)
+
+# TODO NOTE:
+# The RDS MySQL and ElastiCache Redis instances all have...
+
+# LICENSE:
+# This code is released under the MIT software license, see license.txt in project root for details. No warranty of any kind is
+# included, and the copyright notice must be included in redistributions.
+
+# endregion
+
+# TEMPLATE VERSION
+AWSTemplateFormatVersion: 2010-09-09
+
+# DESCRIPTION
+Description: |-
+    Reloaded custom production Database Stack extending a previously created custom Environment Stack with
+    optionally replicated RDS MySQL database, and ElastiCache Redis cluster
+
+# PARAMETERS
+Parameters:
+    # ENVIRONMENT
+    EnvironmentStackName:
+        Description: |-
+            Name of an existing custom environment stack
+            (Minimum: 5, maximum: 16)
+        Type: String
+        MinLength: 5
+        MaxLength: 16
+        AllowedPattern: "[a-z][a-z\\-]+"
+        ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
+    # RDS
+    RdsDatabaseName:
+        Description: |-
+            Name of the MySQL RDS database
+            (Minimum: 5, maximum: 16)
+        Type: String
+        Default: reloaded
+        MinLength: 5
+        MaxLength: 64
+        AllowedPattern: "[a-z][a-z\\-]+"
+        ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
+    RdsUser:
+        NoEcho: true
+        Description: |-
+            Admin account username for MySQL RDS
+            (Minimum: 5, maximum: 16)
+        Type: String
+        MinLength: 5
+        MaxLength: 16
+        AllowedPattern: "[a-z][a-z\\-]+"
+        ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
+    RdsPass:
+        NoEcho: true
+        Description: |-
+            Admin account password for MySQL RDS
+            (Minimum: 16, maximum: 40)
+        Type: String
+        MinLength: 16
+        MaxLength: 40
+        AllowedPattern: "[a-zA-Z0-9]+"
+        ConstraintDescription: Must contain only alphanumeric characters
+    RdsInstance:
+        Description: |-
+            Database Instance Type for MySQL RDS instance(s)
+        Type: String
+        Default: db.t3.micro
+        AllowedValues:
+            - db.t3.micro
+            - db.t3.small
+            - db.t3.medium
+            - db.t3.large
+            - db.t3.xlarge
+            - db.m5.large
+            - db.m5.xlarge
+            - db.r5.large
+            - db.r5.xlarge
+        ConstraintDescription: Must select a valid Database Instance Type
+    RdsStorage:
+        Description: |-
+            The storage size of the MySQL RDS instance(s) in GB
+            (Minimum: 20, maximum: 4096)
+        Type: Number
+        Default: 20
+        MinValue: 20
+        MaxValue: 4096
+        ConstraintDescription: Must be between 20 and 4096 GB
+    RdsStorageMax:
+        Description: |-
+            The upper limit of the storage size MySQL RDS instance(s) in GB
+            (Minimum: 40, maximum: 8192)
+        Type: Number
+        Default: 100
+        MinValue: 40
+        MaxValue: 8192
+        ConstraintDescription: Must be between 40 and 8192 GB
+    RdsMultiAzCreation:
+        Description: If Multi-AZ setting should be enabled for MySQL RDS
+        Type: String
+        AllowedValues:
+            - "No"
+            - "Yes"
+        Default: "Yes"
+        ConstraintDescription: Must provide value
+    RdsReadReplicaCreation:
+        Description: If a read replica should be created for the MySQL RDS master instance
+        Type: String
+        AllowedValues:
+            - "No"
+            - "Yes"
+        Default: "No"
+        ConstraintDescription: Must provide value
+    RdsParameterGroup:
+        Description: Existing RDS Parameter Group to be used while creating MySQL RDS instance(s)
+        Type: String
+        ConstraintDescription: Optional value
+    # CACHE
+    CacheInstance:
+        Description: |-
+            Database Instance Type for Redis ElastiCache instance(s)
+        Type: String
+        Default: cache.t3.micro
+        AllowedValues:
+            - cache.t3.micro
+            - cache.t3.small
+            - cache.t3.medium
+            - cache.m5.large
+            - cache.m5.xlarge
+            - cache.r5.large
+            - cache.r5.xlarge
+    CacheMultiAzCreation:
+        Description: If Multi-AZ setting should be enabled for Redis ElastiCache
+        Type: String
+        AllowedValues:
+            - "No"
+            - "Yes"
+        Default: "Yes"
+        ConstraintDescription: Must provide value
+    CacheNumClusters:
+        Description: Number of clusters the Replication Group utilizes
+        Type: Number
+        AllowedValues:
+            - 2
+            - 3
+            - 4
+            - 5
+        Default: 2
+        ConstraintDescription: "Minimum: 2, maximum: 5"
+    CacheParameterGroup:
+        Description: Existing ElastiCache Parameter Group to be used while creating Redis ElastiCache instance(s)
+        Type: String
+        ConstraintDescription: Optional value
+
+# INTERFACE METADATA
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            - Label:
+                  default: Environment Configuration
+              Parameters:
+                  - EnvironmentStackName
+            - Label:
+                  default: RDS (MySQL) Database Configuration
+              Parameters:
+                  - RdsDatabaseName
+                  - RdsUser
+                  - RdsPass
+            - Label:
+                  default: RDS (MySQL) Configuration
+              Parameters:
+                  - RdsInstance
+                  - RdsStorage
+                  - RdsStorageMax
+                  - RdsMultiAzCreation
+                  - RdsReadReplicaCreation
+                  - RdsParameterGroup
+            - Label:
+                  default: ElastiCache (Redis) Configuration
+              Parameters:
+                  - CacheInstance
+                  - CacheMultiAzCreation
+                  - CacheNumClusters
+                  - CacheParameterGroup
+        ParameterLabels:
+            # ENVIRONMENT
+            EnvironmentStackName:
+                default: Custom Environment Stack Name
+            # RDS
+            RdsDatabaseName:
+                default: Database Name
+            RdsUser:
+                default: Master Username
+            RdsPass:
+                default: Master Password
+            RdsInstance:
+                default: Database EC2 Instance(s)
+            RdsStorage:
+                default: Default Storage Size
+            RdsStorageMax:
+                default: Maximum Storage Size
+            RdsMultiAzCreation:
+                default: Multi-AZ
+            RdsReadReplicaCreation:
+                default: Create Read Replica of Database
+            RdsParameterGroup:
+                default: Existing RDS MySQL Parameter Group (optional)
+            # CACHE
+            CacheInstance:
+                default: Cache EC2 Instance(s)
+            CacheMultiAzCreation:
+                default: Multi-AZ
+            CacheNumClusters:
+                default: Number of clusters
+            CacheParameterGroup:
+                default: Existing ElastiCache Redis Parameter Group (optional)
+
+# CONDITIONS
+Conditions:
+    CreateRdsReadReplica:
+        Fn::Equals: [Ref: RdsReadReplicaCreation, "Yes"]
+    CreateRdsMultiAz:
+        Fn::Equals: [Ref: RdsMultiAzCreation, "Yes"]
+    NoRdsParameterGroup:
+        Fn::Equals: [Ref: RdsParameterGroup, ""]
+    CreateCacheMultiAz:
+        Fn::Equals: [Ref: CacheMultiAzCreation, "Yes"]
+    NoCacheParameterGroup:
+        Fn::Equals: [Ref: CacheParameterGroup, ""]
+
+# AWS RESOURCES TO BE CREATED
+Resources:
+    #-------------------------------------------------------------------------------
+    # region RDS EC2 INSTANCE SECURITY
+
+    # RDS INSTANCE SECURITY GROUP
+    RdsInstanceSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security Group for RDS user EC2 instances
+            VpcId:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, vpc-id]] }
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, rds-ec2-sg]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region RDS SECURITY
+
+    # RDS SECURITY GROUP
+    RdsSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security Group for RDS MySQL database
+            VpcId:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, vpc-id]] }
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, rds-sg]]
+
+    # RDS SECURITY GROUP INGRESS ENTRIES
+    RdsSecurityGroupIngressRdsInstanceMysql:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form RDS user EC2 instances MySQL
+            GroupId:
+                Ref: RdsSecurityGroup
+            SourceSecurityGroupId:
+                Ref: RdsInstanceSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+    RdsSecurityGroupIngressBastionMysql:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form bastion EC2 instances MySQL
+            GroupId:
+                Ref: RdsSecurityGroup
+            SourceSecurityGroupId:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region RDS SUBNET GROUP
+
+    # RDS SUBNET GROUP
+    RdsSubnetGroup:
+        Type: AWS::RDS::DBSubnetGroup
+        Properties:
+            DBSubnetGroupName:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-sng]]
+            DBSubnetGroupDescription:
+                Fn::Join: [" ", ["Private RDS Subnet Group from stack", Ref: EnvironmentStackName]]
+            SubnetIds:
+                Fn::Split:
+                    - ","
+                    - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, subnet-all-priv-id]] }
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, rds-sng]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region RDS DATABASES
+
+    # RDS MASTER DATABASE
+    RdsMasterDatabase:
+        Type: AWS::RDS::DBInstance
+        # IMPORTANT: DO USE this in production!!!
+        DeletionPolicy: Snapshot
+        UpdateReplacePolicy: Snapshot
+        # IMPORTANT: ONLY use for rapid template testing, NEVER use in production!!!
+        # DeletionPolicy: Delete
+        # UpdateReplacePolicy: Delete
+        Properties:
+            Engine: MySQL
+            EngineVersion: 8.0.20
+            Port: 3306
+            # NOTE: unsupported for MySQL 8.x, use custom DBParameterGroupName
+            # CharacterSetName: utf8mb4
+            StorageType: gp2
+            PubliclyAccessible: false
+            CopyTagsToSnapshot: true
+            MonitoringInterval: 0
+            # backups are needed for replication
+            BackupRetentionPeriod:
+                Fn::If: [CreateRdsReadReplica, 1, 0] # days
+            DBInstanceIdentifier:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-master-db]]
+            MultiAZ:
+                Fn::If: [CreateRdsMultiAz, true, false]
+            DBName:
+                Ref: RdsDatabaseName
+            AllocatedStorage:
+                Ref: RdsStorage
+            MaxAllocatedStorage:
+                Ref: RdsStorageMax
+            DBInstanceClass:
+                Ref: RdsInstance
+            MasterUsername:
+                Ref: RdsUser
+            MasterUserPassword:
+                Ref: RdsPass
+            VPCSecurityGroups:
+                - Ref: RdsSecurityGroup
+            DBSubnetGroupName:
+                Ref: RdsSubnetGroup
+            DBParameterGroupName:
+                Fn::If:
+                    - NoRdsParameterGroup
+                    - Ref: AWS::NoValue
+                    - Ref: RdsParameterGroup
+            # AutoMinorVersionUpgrade
+            # AllowMajorVersionUpgrade
+            # PreferredBackupWindow
+            # PreferredMaintenanceWindow
+            # StorageEncrypted
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, rds-master-db]]
+
+    # RDS REPLICA DATABASE
+    RdsReplicaDatabase:
+        Condition: CreateRdsReadReplica
+        Type: AWS::RDS::DBInstance
+        Properties:
+            Engine: MySQL
+            EngineVersion: 8.0.20
+            Port: 3306
+            # NOTE: unsupported for MySQL 8.x, use custom DBParameterGroupName
+            # CharacterSetName: utf8mb4
+            StorageType: gp2
+            PubliclyAccessible: false
+            CopyTagsToSnapshot: true
+            MonitoringInterval: 0
+            BackupRetentionPeriod: 0
+            DBInstanceIdentifier:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-replica-db]]
+            SourceDBInstanceIdentifier:
+                Ref: RdsMasterDatabase
+            AllocatedStorage:
+                Ref: RdsStorage
+            MaxAllocatedStorage:
+                Ref: RdsStorageMax
+            DBInstanceClass:
+                Ref: RdsInstance
+            VPCSecurityGroups:
+                - Ref: RdsSecurityGroup
+            # NOTE: can only specify for replica placed in different region
+            # DBSubnetGroupName:
+            #     Ref: RdsSubnetGroup
+            DBParameterGroupName:
+                Fn::If:
+                    - NoRdsParameterGroup
+                    - Ref: AWS::NoValue
+                    - Ref: RdsParameterGroup
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, rds-replica-db]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region CACHE EC2 INSTANCE SECURITY
+
+    # CACHE INSTANCE SECURITY GROUP
+    CacheInstanceSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security Group for ElastiCache user EC2 instances
+            VpcId:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, vpc-id]] }
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, cache-ec2-sg]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region CACHE SECURITY
+
+    # CACHE SECURITY GROUP
+    CacheSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security Group for ElastiCache Redis
+            VpcId:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, vpc-id]] }
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, cache-sg]]
+
+    # CACHE SECURITY GROUP INGRESS ENTRIES
+    CacheSecurityGroupIngressRdsInstanceRedis:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form ElastiCache user EC2 instances Redis
+            GroupId:
+                Ref: CacheSecurityGroup
+            SourceSecurityGroupId:
+                Ref: CacheInstanceSecurityGroup
+            IpProtocol: tcp
+            FromPort: 6379
+            ToPort: 6379
+    CacheSecurityGroupIngressBastionRedis:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form bastion EC2 instances Redis
+            GroupId:
+                Ref: CacheSecurityGroup
+            SourceSecurityGroupId:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
+            IpProtocol: tcp
+            FromPort: 6379
+            ToPort: 6379
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region CACHE SUBNET GROUP
+
+    # CACHE SUBNET GROUP
+    CacheSubnetGroup:
+        Type: AWS::ElastiCache::SubnetGroup
+        Properties:
+            CacheSubnetGroupName:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-sng]]
+            Description:
+                Fn::Join: [" ", ["Private ElastiCache Subnet Group from stack", Ref: EnvironmentStackName]]
+            SubnetIds:
+                Fn::Split:
+                    - ","
+                    - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, subnet-all-priv-id]] }
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, cache-sng]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region CACHE REPLICATION GROUP
+
+    CacheReplicationGroup:
+        DeletionPolicy: Delete
+        UpdateReplacePolicy: Delete
+        # TODO
+        # DeletionPolicy: Snapshot
+        # UpdateReplacePolicy: Snapshot
+        Type: AWS::ElastiCache::ReplicationGroup
+        Properties:
+            Engine: Redis
+            EngineVersion: 6.x
+            Port: 6379
+            NumCacheClusters:
+                Ref: CacheNumClusters
+            AtRestEncryptionEnabled: false
+            TransitEncryptionEnabled: false
+            # NOTE: needs TransitEncryptionEnabled
+            # AuthToken:
+            SnapshotRetentionLimit: 0
+            AutomaticFailoverEnabled: true
+            ReplicationGroupId:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-rg]]
+            ReplicationGroupDescription: ElastiCache Redis 6.x Replication Group
+            CacheNodeType:
+                Ref: CacheInstance
+            SecurityGroupIds:
+                - Ref: CacheSecurityGroup
+            MultiAZEnabled:
+                Fn::If: [CreateCacheMultiAz, true, false]
+            CacheSubnetGroupName:
+                Ref: CacheSubnetGroup
+            CacheParameterGroupName:
+                Fn::If:
+                    - NoCacheParameterGroup
+                    - Ref: AWS::NoValue
+                    - Ref: CacheParameterGroup
+            # AutoMinorVersionUpgrade
+            # PreferredMaintenanceWindow
+            # SnapshotWindow
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, cache-rg]]
+
+    # endregion
+
+# CLOUDFORMATION EXPORTS
+Outputs:
+    # SETTINGS
+    TemplateId:
+        Description: Reloaded CloudFormation template ID
+        Value: 02-database/production-database.template
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, template-id]]
+    RdsReplicaCreated:
+        Description: If a read replica was created for the MySQL RDS instance
+        Value:
+            Fn::If: [CreateRdsReadReplica, "Yes", "No"]
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-replicated]]
+    # RDS
+    RdsInstanceSecurityGroupId:
+        Description: RDS user EC2 instance Security Group ID
+        Value:
+            Ref: RdsInstanceSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-ec2-sg-id]]
+    RdsSecurityGroupId:
+        Description: RDS Security Group ID
+        Value:
+            Ref: RdsSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-sg-id]]
+    RdsMasterDatabaseId:
+        Description: RDS master MySQL database ID
+        Value:
+            Ref: RdsMasterDatabase
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-master-db-id]]
+    RdsMasterDatabaseEndpoint:
+        Description: RDS master MySQL database endpoint
+        Value:
+            Fn::GetAtt: RdsMasterDatabase.Endpoint.Address
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-master-db-ep]]
+    RdsMasterDatabasePort:
+        Description: RDS master MySQL database port
+        Value:
+            Fn::GetAtt: RdsMasterDatabase.Endpoint.Port
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-master-db-port]]
+    RdsReplicaDatabaseId:
+        Condition: CreateRdsReadReplica
+        Description: RDS replica MySQL database ID
+        Value:
+            Ref: RdsReplicaDatabase
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-replica-db-id]]
+    RdsReplicaDatabaseEndpoint:
+        Condition: CreateRdsReadReplica
+        Description: RDS replica MySQL database endpoint
+        Value:
+            Fn::GetAtt: RdsReplicaDatabase.Endpoint.Address
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-replica-db-ep]]
+    RdsReplicaDatabasePort:
+        Condition: CreateRdsReadReplica
+        Description: RDS replica MySQL database port
+        Value:
+            Fn::GetAtt: RdsReplicaDatabase.Endpoint.Port
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rds-replica-db-port]]
+    # CACHE
+    CacheInstanceSecurityGroupId:
+        Description: ElastiCache user EC2 instance Security Group ID
+        Value:
+            Ref: CacheInstanceSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-ec2-sg-id]]
+    CacheSecurityGroupId:
+        Description: ElastiCache Security Group ID
+        Value:
+            Ref: CacheSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-sg-id]]
+    CacheReplicationGroupId:
+        Description: ElastiCache Redis Replication Group ID
+        Value:
+            Ref: CacheReplicationGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-rg-id]]
+    CacheReplicationGroupPrimaryEndpoint:
+        Description: ElastiCache Redis Replication Group primary endpoint
+        Value:
+            Fn::GetAtt: CacheReplicationGroup.PrimaryEndPoint.Address
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-rg-primary-ep]]
+    CacheReplicationGroupPrimaryPort:
+        Description: ElastiCache Redis Replication Group primary port
+        Value:
+            Fn::GetAtt: CacheReplicationGroup.PrimaryEndPoint.Port
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-rg-primary-port]]
+    CacheReplicationGroupReaderEndpoint:
+        Description: ElastiCache Redis Replication Group reader endpoint
+        Value:
+            Fn::GetAtt: CacheReplicationGroup.ReaderEndPoint.Address
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-rg-reader-ep]]
+    CacheReplicationGroupReaderPort:
+        Description: ElastiCache Redis Replication Group reader port
+        Value:
+            Fn::GetAtt: CacheReplicationGroup.ReaderEndPoint.Port
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, cache-rg-reader-port]]

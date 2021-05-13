@@ -1,0 +1,1328 @@
+---
+# region TEMPLATE INFO
+
+# NETWORKING:
+# This CloudFormation template creates a custom Virtual Private Cloud (VPC) with both private, and public subnets in the first
+# two or three Availability Zones (AZs) of the AWS Region. The public subnets use an Internet Gateway, while the private
+# subnets can use an optional AWS managed NAT Gateway. An internet-facing shared Application Load Balancer spans through the
+# public subnets, while the private subnets have a dedicated internal shared Application Load Balancer.
+
+# ELASTIC BEANSTALK:
+# It is also possible, to attach interface VPC Endpoints for private subnets to be used with Elastic Beanstalk.
+
+# EXPECTED EXISTING RESOURCES:
+# - reloaded-vpc-flow-logs (S3 Bucket, optional for VPC Flow Logs creation)
+# - Route 53 Hosted Zone for domain name (configurable)
+# - SSL Certificate for domain name (configurable)
+
+# NOTE:
+# The NAT Gateway, Application Load Balancers, and VPC Interface Endpoints all have an hourly price, which are billed even if
+# the services are not in use.
+
+# LICENSE:
+# This code is released under the MIT software license, see license.txt in project root for details. No warranty of any kind is
+# included, and the copyright notice must be included in redistributions.
+
+# endregion
+
+# TEMPLATE VERSION
+AWSTemplateFormatVersion: 2010-09-09
+
+# DESCRIPTION
+Description: |-
+    Reloaded custom production Environment Stack with public and private Subnets, public and private shared
+    Application Load Balancers, and optional NAT and / or Elastic Beanstalk VPC Gateways
+
+# PARAMETERS
+Parameters:
+    # VPC
+    VpcCidr:
+        Description: The IP address CIDR block range for the VPC
+        Type: String
+        AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-5]))$
+        Default: 10.0.0.0/20 # 10.0.0.0 - 10.0.15.255 = 4096 IP
+        ConstraintDescription: Must be a valid CIDR range of the form x.x.x.x/25-16
+    VpcFlowLogsCreation:
+        Description: If VPC rejected request Flow Logs should be published to the existing dev-ops managed S3 bucket
+        Type: String
+        AllowedValues:
+            - "No"
+            - "Yes"
+        Default: "No"
+        ConstraintDescription: Must provide value
+    # AZ & SUBNET
+    AvailabilityZoneCount:
+        Description: |-
+            Number of Availability Zones to utilize, will create public -, and private Subnets in each
+            (NOTE: Be sure to check the selected region's capabilities, some regions can utilize only
+            2 Availability Zones, but this can not be verified by CloudFormation)
+        Type: Number
+        AllowedValues:
+            - 2
+            - 3
+        Default: 2
+        ConstraintDescription: "Minimum: 2, maximum: 3"
+    # TODO: separate public & private subnet bits configuration
+    SubnetBits:
+        Description: |-
+            Size of each Subnet to create within the Availability Zones, equals <VPC base IP>/(32 - subnet bits)
+            (NOTE: Amazon reserves the first 4 and last IP addresses in each subnet)
+        Type: Number
+        MinValue: 4
+        MaxValue: 13
+        Default: 9 # 32 - 9 = /23 = 512 IP
+        ConstraintDescription: "Minimum: 4, maximum: 13"
+    # COMMUNICATION
+    NatGatewayCreation:
+        Description: |-
+            If a NAT gateway should be created in the first Availability Zone for outgoing internet
+            requests originating from private subnets
+        Type: String
+        AllowedValues:
+            - "No"
+            - "Yes"
+        Default: "No"
+        ConstraintDescription: Must provide value
+    EbVpcEndpointsCreation:
+        Description: |-
+            If VPC Endpoints should be created for using private subnets with Elastic Beanstalk
+        Type: String
+        AllowedValues:
+            - "No"
+            - "Yes"
+        Default: "Yes"
+        ConstraintDescription: Must provide value
+    # LOAD BALANCER & DNS
+    HostedDomain:
+        Description: The domain name under which to create the stack subdomain
+        Type: String
+        # can not validate parameter configuration time, just do not start without it...
+        MinLength: 3
+        ConstraintDescription: Must provide value
+    HostedZoneId:
+        Description: Hosted Zone ID under which to create Record Set for stack subdomain
+        NoEcho: true
+        Type: String
+        # can not validate parameter configuration time, just do not start without it...
+        MinLength: 3
+        ConstraintDescription: Must provide value
+    HttpsCertificateArn:
+        Description: SSL certificate ARN to be used by public Load Balancer
+        NoEcho: true
+        Type: String
+        # can not validate parameter configuration time, just do not start without it...
+        MinLength: 3
+        ConstraintDescription: Must provide value
+    # EC2 INSTANCE
+    # SshCidr:
+    #     Description: The IP address CIDR block range that is allowed to SSH into bastion EC2 instance(s)
+    #     Type": String
+    #     MinLength: 9
+    #     MaxLength: 18
+    #     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|1[0-9]|2[0-9]|3[0-2]))$
+    #     Default: 0.0.0.0/0
+    #     ConstraintDescription: Must be a valid CIDR range of the form x.x.x.x/x
+    # SshKey:
+    #     Description: Name of an EC2 Key Pair to enable SSH access to the bastion EC2 instance(s)
+    #     Type: AWS::EC2::KeyPair::KeyName
+    #     ConstraintDescription: Must be the name of an existing EC2 Key Pair
+
+# INTERFACE METADATA
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            - Label:
+                  default: VPC Configuration
+              Parameters:
+                  - VpcCidr
+                  - VpcFlowLogsCreation
+            - Label:
+                  default: AZ & Subnet Configuration
+              Parameters:
+                  - AvailabilityZoneCount
+                  - SubnetBits
+            - Label:
+                  default: Communication Configuration
+              Parameters:
+                  - NatGatewayCreation
+                  - EbVpcEndpointsCreation
+            - Label:
+                  default: Load Balancer & DNS Configuration
+              Parameters:
+                  - HostedDomain
+                  - HostedZoneId
+                  - HttpsCertificateArn
+            # - Label:
+            #       default: EC2 Bastion Instance Configuration
+            #   Parameters:
+            #       - SshCidr
+            #       - SshKey
+        ParameterLabels:
+            # VPC
+            VpcCidr:
+                default: VPC CIDR block
+            VpcFlowLogsCreation:
+                default: Enable debug VPC rejected Flow Logs
+            # AZ & SUBNET
+            AvailabilityZoneCount:
+                default: Availability Zone count
+            SubnetBits:
+                default: Bits per Subnet
+            # COMMUNICATION
+            NatGatewayCreation:
+                default: Create NAT gateway for private subnets
+            EbVpcEndpointsCreation:
+                default: Create VPC Endpoints for Elastic Beanstalk
+            # LOAD BALANCER & DNS
+            HostedDomain:
+                default: Domain name for stack subdomain
+            HostedZoneId:
+                default: Hosted Zone ID of domain name
+            HttpsCertificateArn:
+                default: Existing HTTPS Certificate ARN for subdomain
+            # EC2 INSTANCE
+            # SshCidr:
+            #     default: Bastion SSH CIDR block
+            # SshKey:
+            #     default: Bastion SSH EC2 Key Pair
+
+# CONDITIONS
+Conditions:
+    CreateVpcFlowLogs:
+        Fn::Equals: [Ref: VpcFlowLogsCreation, "Yes"]
+    Create3rdSubnet:
+        Fn::Equals: [Ref: AvailabilityZoneCount, 3]
+    CreateNatGateway:
+        Fn::Equals: [Ref: NatGatewayCreation, "Yes"]
+    CreateEbVpcEndpoints:
+        Fn::Equals: [Ref: EbVpcEndpointsCreation, "Yes"]
+
+# AWS RESOURCES TO BE CREATED
+Resources:
+    #-------------------------------------------------------------------------------
+    # region VPC COMPONENTS
+
+    # CUSTOM VPC
+    CustomVpc:
+        Type: AWS::EC2::VPC
+        Properties:
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            CidrBlock:
+                Ref: VpcCidr
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, vpc]]
+
+    # DEBUG VPC REJECT FLOW LOGS
+    VpcFlowLogs:
+        Condition: CreateVpcFlowLogs
+        Type: AWS::EC2::FlowLog
+        Properties:
+            TrafficType: REJECT
+            LogFormat: >-
+                ${subnet-id} ${instance-id} ${interface-id} ${flow-direction}
+                ${pkt-src-aws-service} ${srcaddr} ${srcport}
+                ${pkt-dst-aws-service} ${protocol} ${dstaddr} ${dstport}
+                ${action}
+            LogDestinationType: s3
+            LogDestination: arn:aws:s3:::reloaded-vpc-flow-logs
+            ResourceType: VPC
+            ResourceId:
+                Ref: CustomVpc
+            MaxAggregationInterval: 60
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, vpc-flow-logs]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PUBLIC ACCESS CONTROL
+
+    # PUBLIC ACCESS CONTROL LIST
+    PublicNetworkAcl:
+        Type: AWS::EC2::NetworkAcl
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, acl-pub]]
+
+    # PUBLIC ACL INGRESS ENTRIES
+    PublicNetworkAclEntryInAllowAll:
+        Type: AWS::EC2::NetworkAclEntry
+        Properties:
+            NetworkAclId:
+                Ref: PublicNetworkAcl
+            RuleNumber: 100
+            Egress: false
+            RuleAction: allow
+            Protocol: -1
+            CidrBlock: 0.0.0.0/0
+
+    # PUBLIC ACL EGRESS ENTRIES
+    PublicNetworkAclEntryOutAllowAll:
+        Type: AWS::EC2::NetworkAclEntry
+        Properties:
+            NetworkAclId:
+                Ref: PublicNetworkAcl
+            RuleNumber: 100
+            Egress: true
+            RuleAction: allow
+            Protocol: -1
+            CidrBlock: 0.0.0.0/0
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PRIVATE ACCESS CONTROL
+
+    # PRIVATE ACCESS CONTROL LIST
+    PrivateNetworkAcl:
+        Type: AWS::EC2::NetworkAcl
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, acl-priv]]
+
+    # PRIVATE ACL INGRESS ENTRIES
+    PrivateNetworkAclEntryInAllowAll:
+        Type: AWS::EC2::NetworkAclEntry
+        Properties:
+            NetworkAclId:
+                Ref: PrivateNetworkAcl
+            RuleNumber: 100
+            Egress: false
+            RuleAction: allow
+            Protocol: -1
+            CidrBlock: 0.0.0.0/0
+
+    # PRIVATE ACL EGRESS ENTRIES
+    PrivateNetworkAclEntryOutAllowAll:
+        Type: AWS::EC2::NetworkAclEntry
+        Properties:
+            NetworkAclId:
+                Ref: PrivateNetworkAcl
+            RuleNumber: 100
+            Egress: true
+            RuleAction: allow
+            Protocol: -1
+            CidrBlock: 0.0.0.0/0
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PUBLIC ROUTING
+
+    # PUBLIC INTERNET GATEWAY
+    InternetGateway:
+        Type: AWS::EC2::InternetGateway
+        Properties:
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-internet]]
+    InternetGatewayAttachment:
+        Type: AWS::EC2::VPCGatewayAttachment
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            InternetGatewayId:
+                Ref: InternetGateway
+
+    # PUBLIC ROUTING
+    PublicRouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, table-pub]]
+    PublicRoute:
+        Type: AWS::EC2::Route
+        DependsOn: InternetGatewayAttachment
+        Properties:
+            RouteTableId:
+                Ref: PublicRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId:
+                Ref: InternetGateway
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PRIVATE ROUTING
+
+    # PRIVATE NAT GATEWAY
+    NatGateway:
+        Condition: CreateNatGateway
+        Type: AWS::EC2::NatGateway
+        DependsOn: NatPublicIP
+        Properties:
+            AllocationId:
+                Fn::GetAtt: NatPublicIP.AllocationId
+            SubnetId:
+                Ref: PublicSubnet1
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat]]
+    NatPublicIP:
+        Condition: CreateNatGateway
+        Type: AWS::EC2::EIP
+        DependsOn: CustomVpc
+        Properties:
+            Domain: vpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat]]
+
+    # PRIVATE ROUTING
+    PrivateRouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, table-priv]]
+    PrivateRoute:
+        Condition: CreateNatGateway
+        Type: AWS::EC2::Route
+        Properties:
+            RouteTableId:
+                Ref: PrivateRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            NatGatewayId:
+                Ref: NatGateway
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PUBLIC SUBNETS
+
+    # NOTE: public subnets are only used by the internet-facing public Application Load Balancer,
+    # and for possible future maintenance purposes for publicly accessible bastion EC2 instances
+
+    # PUBLIC SUBNETS
+    PublicSubnet1:
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            AvailabilityZone:
+                Fn::Select:
+                    - 0
+                    - Fn::GetAZs:
+                          Ref: AWS::Region
+            CidrBlock:
+                Fn::Select: [0, Fn::Cidr: [Ref: VpcCidr, 6, Ref: SubnetBits]]
+            MapPublicIpOnLaunch: false
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, subnet-pub-01]]
+    PublicSubnet2:
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            AvailabilityZone:
+                Fn::Select:
+                    - 1
+                    - Fn::GetAZs:
+                          Ref: AWS::Region
+            CidrBlock:
+                Fn::Select: [1, Fn::Cidr: [Ref: VpcCidr, 6, Ref: SubnetBits]]
+            MapPublicIpOnLaunch: false
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, subnet-pub-02]]
+    PublicSubnet3:
+        Condition: Create3rdSubnet
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            AvailabilityZone:
+                Fn::Select:
+                    - 2
+                    - Fn::GetAZs:
+                          Ref: AWS::Region
+            CidrBlock:
+                Fn::Select: [4, Fn::Cidr: [Ref: VpcCidr, 6, Ref: SubnetBits]]
+            MapPublicIpOnLaunch: false
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, subnet-pub-03]]
+
+    # PUBLIC NETWORK ACL ASSOCIATIONS
+    PublicSubnet1NetworkAclAssociation:
+        Type: AWS::EC2::SubnetNetworkAclAssociation
+        Properties:
+            SubnetId:
+                Ref: PublicSubnet1
+            NetworkAclId:
+                Ref: PublicNetworkAcl
+    PublicSubnet2NetworkAclAssociation:
+        Type: AWS::EC2::SubnetNetworkAclAssociation
+        Properties:
+            SubnetId:
+                Ref: PublicSubnet2
+            NetworkAclId:
+                Ref: PublicNetworkAcl
+    PublicSubnet3NetworkAclAssociation:
+        Condition: Create3rdSubnet
+        Type: AWS::EC2::SubnetNetworkAclAssociation
+        Properties:
+            SubnetId:
+                Ref: PublicSubnet3
+            NetworkAclId:
+                Ref: PublicNetworkAcl
+
+    # PUBLIC ROUTE TABLE ASSOCIATIONS
+    PublicSubnet1RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId:
+                Ref: PublicSubnet1
+            RouteTableId:
+                Ref: PublicRouteTable
+    PublicSubnet2RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId:
+                Ref: PublicSubnet2
+            RouteTableId:
+                Ref: PublicRouteTable
+    PublicSubnet3RouteTableAssociation:
+        Condition: Create3rdSubnet
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId:
+                Ref: PublicSubnet3
+            RouteTableId:
+                Ref: PublicRouteTable
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PRIVATE SUBNETS
+
+    # PRIVATE SUBNETS
+    PrivateSubnet1:
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            AvailabilityZone:
+                Fn::Select:
+                    - 0
+                    - Fn::GetAZs:
+                          Ref: AWS::Region
+            CidrBlock:
+                Fn::Select: [2, Fn::Cidr: [Ref: VpcCidr, 6, Ref: SubnetBits]]
+            MapPublicIpOnLaunch: false
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, subnet-priv-01]]
+    PrivateSubnet2:
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            AvailabilityZone:
+                Fn::Select:
+                    - 1
+                    - Fn::GetAZs:
+                          Ref: AWS::Region
+            CidrBlock:
+                Fn::Select: [3, Fn::Cidr: [Ref: VpcCidr, 6, Ref: SubnetBits]]
+            MapPublicIpOnLaunch: false
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, subnet-priv-02]]
+    PrivateSubnet3:
+        Condition: Create3rdSubnet
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            AvailabilityZone:
+                Fn::Select:
+                    - 2
+                    - Fn::GetAZs:
+                          Ref: AWS::Region
+            CidrBlock:
+                Fn::Select: [5, Fn::Cidr: [Ref: VpcCidr, 6, Ref: SubnetBits]]
+            MapPublicIpOnLaunch: false
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, subnet-priv-03]]
+
+    # PRIVATE NETWORK ACL ASSOCIATIONS
+    PrivateSubnet1NetworkAclAssociation:
+        Type: AWS::EC2::SubnetNetworkAclAssociation
+        Properties:
+            SubnetId:
+                Ref: PrivateSubnet1
+            NetworkAclId:
+                Ref: PrivateNetworkAcl
+    PrivateSubnet2NetworkAclAssociation:
+        Type: AWS::EC2::SubnetNetworkAclAssociation
+        Properties:
+            SubnetId:
+                Ref: PrivateSubnet2
+            NetworkAclId:
+                Ref: PrivateNetworkAcl
+    PrivateSubnet3NetworkAclAssociation:
+        Condition: Create3rdSubnet
+        Type: AWS::EC2::SubnetNetworkAclAssociation
+        Properties:
+            SubnetId:
+                Ref: PrivateSubnet3
+            NetworkAclId:
+                Ref: PrivateNetworkAcl
+
+    # PRIVATE ROUTE TABLE ASSOCIATIONS
+    PrivateSubnet1RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId:
+                Ref: PrivateSubnet1
+            RouteTableId:
+                Ref: PrivateRouteTable
+    PrivateSubnet2RouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId:
+                Ref: PrivateSubnet2
+            RouteTableId:
+                Ref: PrivateRouteTable
+    PrivateSubnet3RouteTableAssociation:
+        Condition: Create3rdSubnet
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId:
+                Ref: PrivateSubnet3
+            RouteTableId:
+                Ref: PrivateRouteTable
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region BASTION EC2 INSTANCE SECURITY
+
+    # BASTION SECURITY GROUP
+    # NOTE: security group to restrict default Elastic Beanstalk SSH sources
+    BastionSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security group for bastion EC2 instances
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, bastion-sg]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PRIVATE EC2 INSTANCE SECURITY
+
+    # PRIVATE EC2 INSTANCE SECURITY GROUP
+    PrivateInstanceSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security group for private EC2 instances
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, ec2-priv-sg]]
+
+    # PRIVATE EC2 INSTANCE SG INGRESS ENTRIES
+    PrivateInstanceSecurityGroupIngressVpcAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form VPC CIDR
+            GroupId:
+                Ref: PrivateInstanceSecurityGroup
+            CidrIp:
+                Ref: VpcCidr
+            IpProtocol: -1
+    PrivateInstanceSecurityGroupIngressSelfAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form self
+            GroupId:
+                Ref: PrivateInstanceSecurityGroup
+            SourceSecurityGroupId:
+                Ref: PrivateInstanceSecurityGroup
+            IpProtocol: -1
+
+    # PRIVATE EC2 INSTANCE SG EGRESS ENTRIES
+    PrivateInstanceSecurityGroupEgressVpcAll:
+        Type: AWS::EC2::SecurityGroupEgress
+        Properties:
+            Description: Egress to VPC CIDR
+            GroupId:
+                Ref: PrivateInstanceSecurityGroup
+            CidrIp:
+                Ref: VpcCidr
+            IpProtocol: -1
+    PrivateInstanceSecurityGroupEgressSelfAll:
+        Type: AWS::EC2::SecurityGroupEgress
+        Properties:
+            Description: Egress to self
+            GroupId:
+                Ref: PrivateInstanceSecurityGroup
+            DestinationSecurityGroupId:
+                Ref: PrivateInstanceSecurityGroup
+            IpProtocol: -1
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PUBLIC LOAD BALANCER SECURITY
+
+    # PUBLIC LOAD BALANCER SECURITY GROUP
+    PublicAlbSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security group for public ALB
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, alb-pub-sg]]
+
+    # PUBLIC ALB SG INGRESS ENTRIES
+    PublicAlbSecurityGroupIngressAllHttps:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form all HTTPS
+            GroupId:
+                Ref: PublicAlbSecurityGroup
+            CidrIp: 0.0.0.0/0
+            IpProtocol: 6 # TCP
+            FromPort: 443
+            ToPort: 443
+    PublicAlbSecurityGroupIngressVpcAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form VPC all
+            GroupId:
+                Ref: PublicAlbSecurityGroup
+            CidrIp:
+                Ref: VpcCidr
+            IpProtocol: -1
+    PublicAlbSecurityGroupIngressSelfAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form self all
+            GroupId:
+                Ref: PublicAlbSecurityGroup
+            SourceSecurityGroupId:
+                Ref: PublicAlbSecurityGroup
+            IpProtocol: -1
+
+    # PUBLIC ALB SG EGRESS ENTRIES
+    PublicAlbSecurityGroupEgressAllAll:
+        Type: AWS::EC2::SecurityGroupEgress
+        Properties:
+            Description: Egress to all all
+            GroupId:
+                Ref: PublicAlbSecurityGroup
+            CidrIp: 0.0.0.0/0
+            IpProtocol: -1
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PUBLIC LOAD BALANCER
+
+    # PUBLIC LOAD BALANCER
+    PublicAlb:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        Properties:
+            # NOTE: name tag is not enough for load balancer console
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-pub]]
+            Type: application
+            IpAddressType: ipv4
+            Scheme: internet-facing
+            Subnets:
+                - Ref: PublicSubnet1
+                - Ref: PublicSubnet2
+                - Fn::If: [Create3rdSubnet, Ref: PublicSubnet3, Ref: AWS::NoValue]
+            SecurityGroups:
+                - Ref: PublicAlbSecurityGroup
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, alb-pub]]
+
+    # PUBLIC LOAD BALANCER TARGET GROUP
+    PublicAlbTargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            # NOTE: name tag is not enough for load balancer console
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-pub]]
+            Port: 80
+            Protocol: HTTP
+            HealthCheckEnabled: true
+            HealthCheckIntervalSeconds: 30
+            HealthCheckPath: /
+            HealthCheckPort: traffic-port
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 5
+            UnhealthyThresholdCount: 2
+            HealthyThresholdCount: 5
+            Matcher:
+                HttpCode: 200
+            TargetType: instance
+            VpcId:
+                Ref: CustomVpc
+            # TargetGroupAttributes:
+            #     - Key: stickiness.enabled
+            #       Value: true
+            #     - Key: stickiness.type
+            #       Value: lb_cookie
+            #     - Key: stickiness.lb_cookie.duration_seconds
+            #       Value: 86400
+            #     - Key: load_balancing.algorithm.type
+            #       Value: round_robin
+
+    # PUBLIC LOAD BALANCER LISTENER(S)
+    PublicAlbHttpListener:
+        Type: "AWS::ElasticLoadBalancingV2::Listener"
+        Properties:
+            LoadBalancerArn:
+                Ref: PublicAlb
+            Port: 80
+            Protocol: HTTP
+            DefaultActions:
+                - Order: 1
+                  Type: redirect
+                  RedirectConfig:
+                      Protocol: HTTPS
+                      Port: 443
+                      Host: "#{host}"
+                      Path: "/#{path}"
+                      Query: "#{query}"
+                      StatusCode: HTTP_301
+    # TODO: AWS::ElasticLoadBalancingV2::ListenerRule to allow internal HTTP traffic through Load Balancer DNS
+    PublicAlbHttpsListener:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        Properties:
+            LoadBalancerArn:
+                Ref: PublicAlb
+            Port: 443
+            Protocol: HTTPS
+            SslPolicy: ELBSecurityPolicy-TLS-1-2-2017-01
+            Certificates:
+                - CertificateArn:
+                      Ref: HttpsCertificateArn
+            DefaultActions:
+                - Order: 1
+                  Type: forward
+                  TargetGroupArn:
+                      Ref: PublicAlbTargetGroup
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PRIVATE LOAD BALANCER SECURITY
+
+    # PRIVATE LOAD BALANCER SECURITY GROUP
+    PrivateAlbSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security group for private ALB
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, alb-priv-sg]]
+
+    # PRIVATE ALB SG INGRESS ENTRIES
+    PrivateAlbSecurityGroupIngressVpcAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form VPC all
+            GroupId:
+                Ref: PrivateAlbSecurityGroup
+            CidrIp:
+                Ref: VpcCidr
+            IpProtocol: -1
+    PrivateAlbSecurityGroupIngressSelfAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form self all
+            GroupId:
+                Ref: PrivateAlbSecurityGroup
+            SourceSecurityGroupId:
+                Ref: PrivateAlbSecurityGroup
+            IpProtocol: -1
+
+    # PRIVATE ALB SG EGRESS ENTRIES
+    PrivateAlbSecurityGroupEgressAllAll:
+        Type: AWS::EC2::SecurityGroupEgress
+        Properties:
+            Description: Egress to all all
+            GroupId:
+                Ref: PrivateAlbSecurityGroup
+            CidrIp: 0.0.0.0/0
+            IpProtocol: -1
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region PRIVATE LOAD BALANCER
+
+    # PRIVATE LOAD BALANCER
+    PrivateAlb:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        Properties:
+            # NOTE: name tag is not enough for load balancer console
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-priv]]
+            Type: application
+            IpAddressType: ipv4
+            Scheme: internal
+            Subnets:
+                - Ref: PrivateSubnet1
+                - Ref: PrivateSubnet2
+                - Fn::If: [Create3rdSubnet, Ref: PrivateSubnet3, Ref: AWS::NoValue]
+            SecurityGroups:
+                - Ref: PrivateAlbSecurityGroup
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, alb-priv]]
+
+    # PRIVATE LOAD BALANCER TARGET GROUP
+    PrivateTargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            # NOTE: name tag is not enough for load balancer console
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-priv]]
+            VpcId:
+                Ref: CustomVpc
+            TargetType: instance
+            Port: 80
+            Protocol: HTTP
+            HealthCheckEnabled: true
+            HealthCheckIntervalSeconds: 30
+            HealthCheckPath: /
+            HealthCheckPort: traffic-port
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 5
+            UnhealthyThresholdCount: 2
+            HealthyThresholdCount: 5
+            Matcher:
+                HttpCode: 200
+            # TargetGroupAttributes:
+            #     - Key: stickiness.enabled
+            #       Value: true
+            #     - Key: stickiness.type
+            #       Value: lb_cookie
+            #     - Key: stickiness.lb_cookie.duration_seconds
+            #       Value: 86400
+            #     - Key: load_balancing.algorithm.type
+            #       Value: round_robin
+
+    # PRIVATE LOAD BALANCER LISTENER(S)
+    PrivateHttpListener:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        Properties:
+            LoadBalancerArn:
+                Ref: PrivateAlb
+            Port: 80
+            Protocol: HTTP
+            DefaultActions:
+                - Order: 1
+                  Type: forward
+                  TargetGroupArn:
+                      Ref: PrivateTargetGroup
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region VPC ENDPOINTS SECURITY
+
+    # VPC ENDPOINT SECURITY GROUP
+    VpcEndpointSecurityGroup:
+        Condition: CreateEbVpcEndpoints
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security group for VPC Endpoints
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, vpc-ep-sg]]
+
+    # VPC EP SG INGRESS ENTRIES
+    VpcEndpointSecurityGroupIngressVpcAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form VPC CIDR
+            GroupId:
+                Ref: VpcEndpointSecurityGroup
+            CidrIp:
+                Ref: VpcCidr
+            IpProtocol: -1
+
+    # VPC EP SG EGRESS ENTRIES
+    VpcEndpointSecurityGroupEgressAllAll:
+        Type: AWS::EC2::SecurityGroupEgress
+        Properties:
+            Description: Egress to all all
+            GroupId:
+                Ref: PrivateInstanceSecurityGroup
+            CidrIp: 0.0.0.0/0
+            IpProtocol: -1
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region VPC ENDPOINTS
+
+    # SQS VPC ENDPOINT
+    SqsEndpoint:
+        Condition: CreateEbVpcEndpoints
+        Type: AWS::EC2::VPCEndpoint
+        Properties:
+            VpcEndpointType: Interface
+            VpcId:
+                Ref: CustomVpc
+            PrivateDnsEnabled: true
+            SubnetIds:
+                - Ref: PrivateSubnet1
+                - Ref: PrivateSubnet2
+                - Fn::If: [Create3rdSubnet, Ref: PrivateSubnet3, Ref: AWS::NoValue]
+            SecurityGroupIds:
+                - Ref: VpcEndpointSecurityGroup
+            ServiceName:
+                Fn::Join: [".", [com.amazonaws, Ref: AWS::Region, sqs]]
+
+    # CF VPC ENDPOINT
+    CfEndpoint:
+        Condition: CreateEbVpcEndpoints
+        Type: AWS::EC2::VPCEndpoint
+        Properties:
+            VpcEndpointType: Interface
+            VpcId:
+                Ref: CustomVpc
+            PrivateDnsEnabled: true
+            SubnetIds:
+                - Ref: PrivateSubnet1
+                - Ref: PrivateSubnet2
+                - Fn::If: [Create3rdSubnet, Ref: PrivateSubnet3, Ref: AWS::NoValue]
+            SecurityGroupIds:
+                - Ref: VpcEndpointSecurityGroup
+            ServiceName:
+                Fn::Join: [".", [com.amazonaws, Ref: AWS::Region, cloudformation]]
+
+    # EB VPC ENDPOINT
+    EbEndpoint:
+        Condition: CreateEbVpcEndpoints
+        Type: AWS::EC2::VPCEndpoint
+        Properties:
+            VpcEndpointType: Interface
+            VpcId:
+                Ref: CustomVpc
+            PrivateDnsEnabled: true
+            SubnetIds:
+                - Ref: PrivateSubnet1
+                - Ref: PrivateSubnet2
+                - Fn::If: [Create3rdSubnet, Ref: PrivateSubnet3, Ref: AWS::NoValue]
+            SecurityGroupIds:
+                - Ref: VpcEndpointSecurityGroup
+            ServiceName:
+                Fn::Join: [".", [com.amazonaws, Ref: AWS::Region, elasticbeanstalk]]
+
+    # EB HEALTH VPC ENDPOINT
+    EbHealthEndpoint:
+        Condition: CreateEbVpcEndpoints
+        Type: AWS::EC2::VPCEndpoint
+        Properties:
+            VpcEndpointType: Interface
+            VpcId:
+                Ref: CustomVpc
+            PrivateDnsEnabled: true
+            SubnetIds:
+                - Ref: PrivateSubnet1
+                - Ref: PrivateSubnet2
+                - Fn::If: [Create3rdSubnet, Ref: PrivateSubnet3, Ref: AWS::NoValue]
+            SecurityGroupIds:
+                - Ref: VpcEndpointSecurityGroup
+            ServiceName:
+                Fn::Join: [".", [com.amazonaws, Ref: AWS::Region, elasticbeanstalk-health]]
+
+    # S3 VPC ENDPOINT
+    S3Endpoint:
+        Condition: CreateEbVpcEndpoints
+        Type: AWS::EC2::VPCEndpoint
+        Properties:
+            VpcEndpointType: Gateway
+            VpcId:
+                Ref: CustomVpc
+            RouteTableIds:
+                - Ref: PrivateRouteTable
+            ServiceName:
+                Fn::Join: [".", [com.amazonaws, Ref: AWS::Region, s3]]
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region SUBDOMAIN DNS RECORD
+
+    # SUBDOMAIN DNS RECORD FOR PUBLIC ALB
+    SubdomainDnsRecord:
+        Type: AWS::Route53::RecordSet
+        Properties:
+            Comment:
+                Fn::Join: [" ", [Add subdomain, Ref: AWS::StackName, to, Ref: HostedDomain]]
+            Type: A
+            HostedZoneId:
+                Ref: HostedZoneId
+            Name:
+                Fn::Join: [".", [Ref: AWS::StackName, Ref: HostedDomain]]
+            AliasTarget:
+                HostedZoneId:
+                    Fn::GetAtt: PublicAlb.CanonicalHostedZoneID
+                DNSName:
+                    Fn::GetAtt: PublicAlb.DNSName
+                EvaluateTargetHealth: false
+
+    # endregion
+
+# CLOUDFORMATION EXPORTS
+Outputs:
+    # SETTINGS
+    TemplateId:
+        Description: Reloaded CloudFormation template ID
+        Value: 01-environment/production-environment.template
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, template-id]]
+    ThirdSubnetCreated:
+        Description: If 3rd Subnet was created
+        Value:
+            Fn::If: [Create3rdSubnet, "Yes", "No"]
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, 3-subnets]]
+    # VPC
+    CustomVpcId:
+        Description: VPC ID
+        Value:
+            Ref: CustomVpc
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, vpc-id]]
+    # NETWORK ACL
+    PublicNetworkAclId:
+        Description: Public Network ACL ID
+        Value:
+            Ref: PublicNetworkAcl
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, acl-pub-id]]
+    PrivateNetworkAclId:
+        Description: Private Network ACL ID
+        Value:
+            Ref: PrivateNetworkAcl
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, acl-priv-id]]
+    # ROUTING
+    PublicRouteTableId:
+        Description: Public Route Table ID
+        Value:
+            Ref: PublicRouteTable
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rtb-pub-id]]
+    PrivateRouteTableId:
+        Description: Private Route Table ID
+        Value:
+            Ref: PrivateRouteTable
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rtb-priv-id]]
+    # PUBLIC SUBNETS
+    PublicSubnet1Id:
+        Description: Public Subnet 1 ID
+        Value:
+            Ref: PublicSubnet1
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-01-pub-id]]
+    PublicSubnet2Id:
+        Description: Public Subnet 2 ID
+        Value:
+            Ref: PublicSubnet2
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-02-pub-id]]
+    PublicSubnet3Id:
+        Condition: Create3rdSubnet
+        Description: Public Subnet 3 ID
+        Value:
+            Ref: PublicSubnet3
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-03-pub-id]]
+    PublicSubnetAllId:
+        Description: Public Subnet comma separated IDs
+        Value:
+            Fn::Join:
+                - ","
+                - - Ref: PublicSubnet1
+                  - Ref: PublicSubnet2
+                  - Fn::If: [Create3rdSubnet, Ref: PublicSubnet3, Ref: AWS::NoValue]
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-all-pub-id]]
+    # PRIVATE SUBNETS
+    PrivateSubnet1Id:
+        Description: Private Subnet 1 ID
+        Value:
+            Ref: PrivateSubnet1
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-01-priv-id]]
+    PrivateSubnet2Id:
+        Description: Private Subnet 2 ID
+        Value:
+            Ref: PrivateSubnet2
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-02-priv-id]]
+    PrivateSubnet3Id:
+        Condition: Create3rdSubnet
+        Description: Private Subnet 3 ID
+        Value:
+            Ref: PrivateSubnet3
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-03-priv-id]]
+    PrivateSubnetAllId:
+        Description: Private Subnet comma separated IDs
+        Value:
+            Fn::Join:
+                - ","
+                - - Ref: PrivateSubnet1
+                  - Ref: PrivateSubnet2
+                  - Fn::If: [Create3rdSubnet, Ref: PrivateSubnet3, Ref: AWS::NoValue]
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, subnet-all-priv-id]]
+    # INSTANCE SECURITY
+    BastionSecurityGroupId:
+        Description: Bastion Security Group ID
+        Value:
+            Ref: BastionSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, bastion-sg-id]]
+    PrivateInstanceSecurityGroupId:
+        Description: Private EC2 instance Security Group ID
+        Value:
+            Ref: PrivateInstanceSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, ec2-sg-priv-id]]
+    # PUBLIC ALB
+    PublicAlbSecurityGroupId:
+        Description: Public ALB Security Group ID
+        Value:
+            Ref: PublicAlbSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-sg-pub-id]]
+    PublicAlbId:
+        Description: Public ALB ID
+        Value:
+            Ref: PublicAlb
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-pub-id]]
+    PublicAlbDns:
+        Description: Public ALB DNS
+        Value:
+            Fn::GetAtt: PublicAlb.DNSName
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-pub-dns]]
+    PublicAlbHostedDns:
+        Description: Public ALB subdomain created under managed domain
+        Value:
+            Fn::Join: [".", [Ref: AWS::StackName, Ref: HostedDomain]]
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-pub-host-dns]]
+    PublicAlbTargetGroupId:
+        Description: Public Target Group ID
+        Value:
+            Ref: PublicAlbTargetGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-pub-id]]
+    # PRIVATE ALB
+    PrivateAlbSecurityGroupId:
+        Description: Private ALB Security Group ID
+        Value:
+            Ref: PrivateAlbSecurityGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-sg-priv-id]]
+    PrivateAlbId:
+        Description: Private ALB ID
+        Value:
+            Ref: PrivateAlb
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-priv-id]]
+    PrivateAlbDns:
+        Description: Private ALB DNS
+        Value:
+            Fn::GetAtt: PrivateAlb.DNSName
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-priv-dns]]
+    PrivateTargetGroupId:
+        Description: Private Target Group ID
+        Value:
+            Ref: PrivateTargetGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-priv-id]]
