@@ -26,7 +26,7 @@ AWSTemplateFormatVersion: 2010-09-09
 
 # DESCRIPTION
 Description: |-
-    Reloaded custom production Database Stack extending a previously created custom Environment Stack with
+    Custom production Database Stack extending a previously created custom Environment Stack with
     optionally replicated RDS MySQL database, and ElastiCache Redis cluster
 
 # PARAMETERS
@@ -47,7 +47,6 @@ Parameters:
             Name of the MySQL RDS database
             (Minimum: 5, maximum: 16)
         Type: String
-        Default: reloaded
         MinLength: 5
         MaxLength: 64
         AllowedPattern: "[a-z][a-z\\-]+"
@@ -555,7 +554,7 @@ Resources:
 Outputs:
     # SETTINGS
     TemplateId:
-        Description: Reloaded CloudFormation template ID
+        Description: Custom CloudFormation template ID
         Value: 02-database/production-database.template
         Export:
             Name:

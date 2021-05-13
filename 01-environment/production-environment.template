@@ -11,7 +11,7 @@
 # It is also possible, to attach interface VPC Endpoints for private subnets to be used with Elastic Beanstalk.
 
 # EXPECTED EXISTING RESOURCES:
-# - reloaded-vpc-flow-logs (S3 Bucket, optional for VPC Flow Logs creation)
+# - admin-vpc-flow-logs (S3 Bucket, optional for VPC Flow Logs creation)
 # - Route 53 Hosted Zone for domain name (configurable)
 # - SSL Certificate for domain name (configurable)
 
@@ -30,7 +30,7 @@ AWSTemplateFormatVersion: 2010-09-09
 
 # DESCRIPTION
 Description: |-
-    Reloaded custom production Environment Stack with public and private Subnets, public and private shared
+    Custom production Environment Stack with public and private Subnets, public and private shared
     Application Load Balancers, and optional NAT and / or Elastic Beanstalk VPC Gateways
 
 # PARAMETERS
@@ -227,7 +227,7 @@ Resources:
                 ${pkt-dst-aws-service} ${protocol} ${dstaddr} ${dstport}
                 ${action}
             LogDestinationType: s3
-            LogDestination: arn:aws:s3:::reloaded-vpc-flow-logs
+            LogDestination: arn:aws:s3:::admin-vpc-flow-logs
             ResourceType: VPC
             ResourceId:
                 Ref: CustomVpc
@@ -1128,7 +1128,7 @@ Resources:
 Outputs:
     # SETTINGS
     TemplateId:
-        Description: Reloaded CloudFormation template ID
+        Description: Custom CloudFormation template ID
         Value: 01-environment/production-environment.template
         Export:
             Name:
