@@ -4,16 +4,17 @@
 # RELATIONAL DATABASE SERVICE:
 # This CloudFormation template creates a MySQL 8 master database, and an optional read replica.
 
-# TODO ELASTICACHE:
-# This CloudFormation template creates a Redis cluster...
+# ELASTICACHE:
+# This CloudFormation template creates a single Redis replication node group with 2 to 5 clusters.
 
 # EXPECTED EXISTING RESOURCES:
 # - CloudFormation production environment Stack
 # - RDS MySQL Parameter Group (configurable, optional)
 # - ElastiCache Redis Parameter Group (configurable, optional)
 
-# TODO NOTE:
-# The RDS MySQL and ElastiCache Redis instances all have...
+# NOTE:
+# The RDS MySQL and ElastiCache Redis instances all have an hourly price, which are billed even if
+# the services are not in use.
 
 # LICENSE:
 # This code is released under the MIT software license, see license.txt in project root for details. No warranty of any kind is
@@ -52,11 +53,11 @@ Parameters:
         AllowedPattern: "[a-z][a-z\\-]+"
         ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
     RdsUser:
-        NoEcho: true
         Description: |-
             Admin account username for MySQL RDS
             (Minimum: 5, maximum: 16)
         Type: String
+        Default: admin
         MinLength: 5
         MaxLength: 16
         AllowedPattern: "[a-z][a-z\\-]+"
@@ -75,7 +76,7 @@ Parameters:
         Description: |-
             Database Instance Type for MySQL RDS instance(s)
         Type: String
-        Default: db.t3.micro
+        Default: db.t3.small
         AllowedValues:
             - db.t3.micro
             - db.t3.small
@@ -126,11 +127,21 @@ Parameters:
         Type: String
         ConstraintDescription: Optional value
     # CACHE
+    CachePass:
+        NoEcho: true
+        Description: |-
+            Auth Token for Redis ElastiCache
+            (Minimum: 16, maximum: 40)
+        Type: String
+        MinLength: 16
+        MaxLength: 40
+        AllowedPattern: "[a-zA-Z0-9]+"
+        ConstraintDescription: Must contain only alphanumeric characters
     CacheInstance:
         Description: |-
             Database Instance Type for Redis ElastiCache instance(s)
         Type: String
-        Default: cache.t3.micro
+        Default: cache.t3.small
         AllowedValues:
             - cache.t3.micro
             - cache.t3.small
@@ -188,6 +199,7 @@ Metadata:
             - Label:
                   default: ElastiCache (Redis) Configuration
               Parameters:
+                  - CachePass
                   - CacheInstance
                   - CacheMultiAzCreation
                   - CacheNumClusters
@@ -216,6 +228,8 @@ Metadata:
             RdsParameterGroup:
                 default: Existing RDS MySQL Parameter Group (optional)
             # CACHE
+            CachePass:
+                default: Auth Token
             CacheInstance:
                 default: Cache EC2 Instance(s)
             CacheMultiAzCreation:
@@ -519,9 +533,10 @@ Resources:
             NumCacheClusters:
                 Ref: CacheNumClusters
             AtRestEncryptionEnabled: false
-            TransitEncryptionEnabled: false
+            TransitEncryptionEnabled: true
             # NOTE: needs TransitEncryptionEnabled
-            # AuthToken:
+            AuthToken:
+                Ref: CachePass
             SnapshotRetentionLimit: 0
             AutomaticFailoverEnabled: true
             ReplicationGroupId:
