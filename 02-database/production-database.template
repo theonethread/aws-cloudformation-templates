@@ -36,11 +36,11 @@ Parameters:
     EnvironmentStackName:
         Description: |-
             Name of an existing custom environment stack
-            (Minimum: 5, maximum: 16)
+            (Minimum: 5, maximum: 32)
         Type: String
         MinLength: 5
-        MaxLength: 16
-        AllowedPattern: "[a-z][a-z\\-]+"
+        MaxLength: 32
+        AllowedPattern: "[a-z][a-z0-9\\-]+"
         ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
     # RDS
     RdsDatabaseName:

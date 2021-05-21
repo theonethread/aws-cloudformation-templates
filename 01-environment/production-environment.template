@@ -679,6 +679,15 @@ Resources:
             SourceSecurityGroupId:
                 Ref: PrivateInstanceSecurityGroup
             IpProtocol: -1
+    PrivateInstanceSecurityGroupIngressPublicAlbAll:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form public ALB
+            GroupId:
+                Ref: PrivateInstanceSecurityGroup
+            SourceSecurityGroupId:
+                Ref: PublicAlbSecurityGroup
+            IpProtocol: -1
 
     # PRIVATE EC2 INSTANCE SG EGRESS ENTRIES
     PrivateInstanceSecurityGroupEgressVpcAll:
@@ -766,7 +775,7 @@ Resources:
     PublicAlb:
         Type: AWS::ElasticLoadBalancingV2::LoadBalancer
         Properties:
-            # NOTE: name tag is not enough for load balancer console
+            # NOTE: name tag is not enough for load balancer console, and can only be 32 characters long
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, alb-pub]]
             Type: application
@@ -787,19 +796,19 @@ Resources:
     PublicAlbTargetGroup:
         Type: AWS::ElasticLoadBalancingV2::TargetGroup
         Properties:
-            # NOTE: name tag is not enough for load balancer console
+            # NOTE: name tag is not enough for load balancer console, and can only be 32 characters long
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-pub]]
             Port: 80
             Protocol: HTTP
             HealthCheckEnabled: true
-            HealthCheckIntervalSeconds: 30
             HealthCheckPath: /
-            HealthCheckPort: traffic-port
+            HealthCheckPort: 80
             HealthCheckProtocol: HTTP
-            HealthCheckTimeoutSeconds: 5
-            UnhealthyThresholdCount: 2
-            HealthyThresholdCount: 5
+            HealthCheckIntervalSeconds: 20 # sec
+            HealthCheckTimeoutSeconds: 5 # sec
+            UnhealthyThresholdCount: 3
+            HealthyThresholdCount: 3
             Matcher:
                 HttpCode: 200
             TargetType: instance
@@ -811,13 +820,13 @@ Resources:
             #     - Key: stickiness.type
             #       Value: lb_cookie
             #     - Key: stickiness.lb_cookie.duration_seconds
-            #       Value: 86400
+            #       Value: 604800
             #     - Key: load_balancing.algorithm.type
             #       Value: round_robin
 
     # PUBLIC LOAD BALANCER LISTENER(S)
     PublicAlbHttpListener:
-        Type: "AWS::ElasticLoadBalancingV2::Listener"
+        Type: AWS::ElasticLoadBalancingV2::Listener
         Properties:
             LoadBalancerArn:
                 Ref: PublicAlb
@@ -833,7 +842,6 @@ Resources:
                       Path: "/#{path}"
                       Query: "#{query}"
                       StatusCode: HTTP_301
-    # TODO: AWS::ElasticLoadBalancingV2::ListenerRule to allow internal HTTP traffic through Load Balancer DNS
     PublicAlbHttpsListener:
         Type: AWS::ElasticLoadBalancingV2::Listener
         Properties:
@@ -907,7 +915,7 @@ Resources:
     PrivateAlb:
         Type: AWS::ElasticLoadBalancingV2::LoadBalancer
         Properties:
-            # NOTE: name tag is not enough for load balancer console
+            # NOTE: name tag is not enough for load balancer console, and can only be 32 characters long
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, alb-priv]]
             Type: application
@@ -928,7 +936,7 @@ Resources:
     PrivateTargetGroup:
         Type: AWS::ElasticLoadBalancingV2::TargetGroup
         Properties:
-            # NOTE: name tag is not enough for load balancer console
+            # NOTE: name tag is not enough for load balancer console, and can only be 32 characters long
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-priv]]
             VpcId:
@@ -937,13 +945,13 @@ Resources:
             Port: 80
             Protocol: HTTP
             HealthCheckEnabled: true
-            HealthCheckIntervalSeconds: 30
             HealthCheckPath: /
-            HealthCheckPort: traffic-port
+            HealthCheckPort: 80
             HealthCheckProtocol: HTTP
-            HealthCheckTimeoutSeconds: 5
-            UnhealthyThresholdCount: 2
-            HealthyThresholdCount: 5
+            HealthCheckIntervalSeconds: 20 # sec
+            HealthCheckTimeoutSeconds: 5 # sec
+            UnhealthyThresholdCount: 3
+            HealthyThresholdCount: 3
             Matcher:
                 HttpCode: 200
             # TargetGroupAttributes:
@@ -952,7 +960,7 @@ Resources:
             #     - Key: stickiness.type
             #       Value: lb_cookie
             #     - Key: stickiness.lb_cookie.duration_seconds
-            #       Value: 86400
+            #       Value: 604800
             #     - Key: load_balancing.algorithm.type
             #       Value: round_robin
 
@@ -1297,6 +1305,13 @@ Outputs:
         Export:
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-pub-id]]
+    PublicAlbHttpsListenerId:
+        Description: Public ALB HTTPS Listener ID
+        Value:
+            Ref: PublicAlbHttpsListener
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-lsr-id]]
     # PRIVATE ALB
     PrivateAlbSecurityGroupId:
         Description: Private ALB Security Group ID

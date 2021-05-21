@@ -1,0 +1,50 @@
+---
+# region TEMPLATE INFO
+
+# BASTION EC2 INSTANCE:
+# TODO This CloudFormation template
+
+# EXPECTED EXISTING RESOURCES:
+# - CloudFormation production environment Stack
+
+# endregion
+
+# TEMPLATE VERSION
+AWSTemplateFormatVersion: 2010-09-09
+
+# DESCRIPTION
+Description: |-
+    Custom production Bastion Stack extending a previously created custom Environment Stack with publicly
+    accessible Bastion EC2 Instance
+
+# PARAMETERS
+Parameters:
+    # ENVIRONMENT
+    EnvironmentStackName:
+        Description: |-
+            Name of an existing custom environment stack
+            (Minimum: 5, maximum: 32)
+        Type: String
+        MinLength: 5
+        MaxLength: 32
+        AllowedPattern: "[a-z][a-z0-9\\-]+"
+        ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
+
+# INTERFACE METADATA
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            - Label:
+                  default: Environment Configuration
+              Parameters:
+                  - EnvironmentStackName
+        ParameterLabels:
+            # ENVIRONMENT
+            EnvironmentStackName:
+                default: Custom Environment Stack Name
+
+# AWS RESOURCES TO BE CREATED
+Resources:
+
+# CLOUDFORMATION EXPORTS
+Outputs:

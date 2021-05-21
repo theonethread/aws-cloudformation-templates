@@ -1,0 +1,178 @@
+---
+# region TEMPLATE INFO
+
+# PUBLIC LOAD BALANCING:
+# This CloudFormation template creates an empty Target Group and a Listener Rule connected to the existing Public Shared
+# Application Load Balancer HTTPS Listener based on the existing production Environment Stack's hosted domain, and the
+# provided starting path segment
+#
+# NOTE: The newly created production public Target Group must be attached to an existing AutoScaling Group manually
+
+# AWS CLI:
+# To get the name of the AutoScaling Group Elastic Beanstalk created run:
+# $ aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[?contains(Tags[?Key==`Name`].Value, `<<EB-ENV-NAME>>`)].AutoScalingGroupName' --region <<REGION>> --profile <<PROFILE>>
+#
+# To attach the newly created production public Target Group to the AutoScaling Group Elastic Beanstalk created run:
+# $ aws autoscaling attach-load-balancer-target-groups --auto-scaling-group-name <<EB-ASG-NAME>> --target-group-arns <<TARGET-GROUP-ARNS>> --region <<REGION>> --profile <<PROFILE>>
+#
+# To detach the production public Target Group (before deleting the stack) from the AutoScaling Group Elastic Beanstalk created run:
+# $ aws autoscaling detach-load-balancer-target-groups --auto-scaling-group-name <<EB-ASG-NAME>> --target-group-arns <<TARGET-GROUP-ARNS>> --region <<REGION>> --profile <<PROFILE>>
+
+# EXPECTED EXISTING RESOURCES:
+# - CloudFormation production environment Stack
+# - Elastic Beanstalk production internal Environment
+
+# LICENSE:
+# This code is released under the MIT software license, see license.txt in project root for details. No warranty of any kind is
+# included, and the copyright notice must be included in redistributions.
+
+# endregion
+
+# TEMPLATE VERSION
+AWSTemplateFormatVersion: 2010-09-09
+
+# DESCRIPTION
+Description: |-
+    Custom production Auto-Scaling Group Public Accessibility Stack extending a previously created custom Environment Stack and
+    internal Elastic Beanstalk application with publicly accessible HTTPS load balancing
+
+# PARAMETERS
+Parameters:
+    # ENVIRONMENT
+    EnvironmentStackName:
+        Description: |-
+            Name of an existing custom environment stack
+            (Minimum: 5, maximum: 32)
+        Type: String
+        MinLength: 5
+        MaxLength: 32
+        AllowedPattern: "[a-z][a-z0-9\\-]+"
+        ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
+    # APPLICATION
+    PathSegment:
+        Description: |-
+            Path segment for Load Balancer Listener Rule
+            (Minimum: 5, maximum: 32, must contain only lowercase alphanumeric characters)
+        Type: String
+        MinLength: 5
+        MaxLength: 32
+        AllowedPattern: "[a-z0-9]+"
+        ConstraintDescription: Must begin with a "/", and contain only alphanumeric characters, dash, and "/"
+    HealthCheckPath:
+        Description: |-
+            Health check path for Load Balancer Target Group
+            (Must start with "/", WITHOUT Load Balancer path segment)
+        Type: String
+        MinLength: 1
+        MaxLength: 64
+        AllowedPattern: "/[a-zA-Z0-9\\-/]+"
+        ConstraintDescription: Must begin with a "/", and contain only alphanumeric characters, dash, and "/"
+    # LISTENER
+    Priority:
+        Description: |-
+            Priority of the listener rule
+            (Existing priorities will collide)
+        Type: Number
+        MinValue: 1
+        MaxValue: 50000
+        ConstraintDescription: Must provide value
+
+# INTERFACE METADATA
+Metadata:
+    AWS::CloudFormation::Interface:
+        ParameterGroups:
+            - Label:
+                  default: Environment Configuration
+              Parameters:
+                  - EnvironmentStackName
+            - Label:
+                  default: Application Configuration
+              Parameters:
+                  - PathSegment
+                  - HealthCheckPath
+            - Label:
+                  default: Listener Configuration
+              Parameters:
+                  - Priority
+        ParameterLabels:
+            # ENVIRONMENT
+            EnvironmentStackName:
+                default: Custom Environment Stack Name
+            # APPLICATION
+            PathSegment:
+                default: Application path segment
+            HealthCheckPath:
+                default: Application health check path
+            # LISTENER
+            Priority:
+                default: Listener Rule Priority
+
+# AWS RESOURCES TO BE CREATED
+Resources:
+    #-------------------------------------------------------------------------------
+    # region PUBLIC LOAD BALANCER
+
+    # PUBLIC LOAD BALANCER TARGET GROUP
+    PublicAlbTargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            # NOTE: name tag is not enough for load balancer console, and can only be 32 characters long
+            Name:
+                Ref: AWS::StackName
+            Port: 80
+            Protocol: HTTP
+            HealthCheckEnabled: true
+            HealthCheckPath:
+                Ref: HealthCheckPath
+            HealthCheckPort: 80
+            HealthCheckProtocol: HTTP
+            HealthCheckIntervalSeconds: 20 # sec
+            HealthCheckTimeoutSeconds: 5 # sec
+            UnhealthyThresholdCount: 3
+            HealthyThresholdCount: 3
+            Matcher:
+                HttpCode: 200
+            TargetType: instance
+            VpcId:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, vpc-id]] }
+            # TargetGroupAttributes:
+            #     - Key: stickiness.enabled
+            #       Value: true
+            #     - Key: stickiness.type
+            #       Value: lb_cookie
+            #     - Key: stickiness.lb_cookie.duration_seconds
+            #       Value: 604800
+            #     - Key: load_balancing.algorithm.type
+            #       Value: round_robin
+
+    # PUBLIC LOAD BALANCER LISTENER RULE
+    PublicAlbListenerRule:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            ListenerArn:
+                Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-lsr-id]] }
+            Priority:
+                Ref: Priority
+            Conditions:
+                - Field: host-header
+                  Values:
+                      - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-pub-host-dns]] }
+                - Field: path-pattern
+                  Values:
+                      - Fn::Join: ["", [/, Ref: PathSegment, /*]]
+            Actions:
+                - Type: forward
+                  TargetGroupArn:
+                      Ref: PublicAlbTargetGroup
+
+    # endregion
+
+# CLOUDFORMATION EXPORTS
+Outputs:
+    PublicAlbTargetGroupId:
+        Description: Public Target Group ID
+        Value:
+            Ref: PublicAlbTargetGroup
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, alb-tg-pub-id]]
