@@ -48,3 +48,10 @@ Resources:
 
 # CLOUDFORMATION EXPORTS
 Outputs:
+    # SETTINGS
+    TemplateId:
+        Description: Custom CloudFormation template ID
+        Value: 04-bastion/production-bastion.template
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, template-id]]

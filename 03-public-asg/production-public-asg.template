@@ -169,6 +169,14 @@ Resources:
 
 # CLOUDFORMATION EXPORTS
 Outputs:
+    # SETTINGS
+    TemplateId:
+        Description: Custom CloudFormation template ID
+        Value: 03-public-asg/production-public-asg.template
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, template-id]]
+    # PUBLIC LOAD BALANCER
     PublicAlbTargetGroupId:
         Description: Public Target Group ID
         Value:
