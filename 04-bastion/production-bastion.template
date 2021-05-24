@@ -2,10 +2,19 @@
 # region TEMPLATE INFO
 
 # BASTION EC2 INSTANCE:
-# TODO This CloudFormation template
+# This CloudFormation template places az EC2 Bastion Instance into one of the Public Subnets of an existing
+# Custom Environment.
 
 # EXPECTED EXISTING RESOURCES:
 # - CloudFormation production environment Stack
+# - EC2 KeyPair for SSH (configurable)
+
+# NOTE:
+# The EC2 Bastion Instance have an hourly price, which is billed even if the instance is not in use.
+
+# LICENSE:
+# This code is released under the MIT software license, see license.txt in project root for details. No warranty of any kind is
+# included, and the copyright notice must be included in redistributions.
 
 # endregion
 
@@ -31,7 +40,7 @@ Parameters:
         ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
     # SSH SETTINGS
     SshCidr:
-        Description: The IP address CIDR block range that is allowed to SSH into bastion EC2 instance(s)
+        Description: The IP address CIDR block range that is allowed to SSH into bastion EC2 instance
         Type": String
         MinLength: 9
         MaxLength: 18
@@ -39,7 +48,7 @@ Parameters:
         Default: 0.0.0.0/0
         ConstraintDescription: Must be a valid CIDR range of the form x.x.x.x/x
     SshKey:
-        Description: Name of an EC2 Key Pair to enable SSH access to the bastion EC2 instance(s)
+        Description: Name of an EC2 Key Pair to enable SSH access to the bastion EC2 instance
         Type: AWS::EC2::KeyPair::KeyName
         ConstraintDescription: Must be the name of an existing EC2 Key Pair
     # BASTION INSTANCE
@@ -62,6 +71,13 @@ Parameters:
         Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
         Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
         ConstraintDescription: Must be the name of an Amazon Machine Image
+    BastionSubnet:
+        Description: Existing Custom Environment public Subnet to place Bastion Instance in
+        Type: String
+        AllowedValues:
+            Fn::Split:
+                - ","
+                - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, subnet-all-pub-id]] }
 
 # INTERFACE METADATA
 Metadata:
@@ -81,6 +97,7 @@ Metadata:
               Parameters:
                   - BastionInstance
                   - BastionAmi
+                  - BastionSubnet
         ParameterLabels:
             # ENVIRONMENT
             EnvironmentStackName:
@@ -95,6 +112,8 @@ Metadata:
                 default: EC2 Instance Type
             BastionAmi:
                 default: EC2 AMI
+            BastionSubnet:
+                default: Existing Public Subnet
 
 # AWS RESOURCES TO BE CREATED
 Resources:
@@ -124,12 +143,19 @@ Resources:
     Properties:
         InstanceType:
             Ref: BastionInstance
-        SecurityGroups:
+        SecurityGroupIds:
             - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
         KeyName:
             Ref: SshKey
         ImageId:
             Ref: BastionAmi
+        NetworkInterfaces:
+            - DeviceIndex: 0
+              AssociatePublicIpAddress: true
+              GroupSet:
+                  - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
+              SubnetId:
+                  Ref: BastionSubnet
 
     # endregion
 
