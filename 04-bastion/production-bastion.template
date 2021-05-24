@@ -29,7 +29,7 @@ Parameters:
         MaxLength: 32
         AllowedPattern: "[a-z][a-z0-9\\-]+"
         ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
-    # BASTION INSTANCE
+    # SSH SETTINGS
     SshCidr:
         Description: The IP address CIDR block range that is allowed to SSH into bastion EC2 instance(s)
         Type": String
@@ -42,6 +42,26 @@ Parameters:
         Description: Name of an EC2 Key Pair to enable SSH access to the bastion EC2 instance(s)
         Type: AWS::EC2::KeyPair::KeyName
         ConstraintDescription: Must be the name of an existing EC2 Key Pair
+    # BASTION INSTANCE
+    BastionInstance:
+        Description: Bastion Instance Type
+        Type: String
+        Default: t3.micro
+        AllowedValues:
+            - t3.micro
+            - t3.small
+            - t3.medium
+            - t3.large
+            - t3.xlarge
+            - m5.large
+            - m5.xlarge
+            - r5.large
+            - r5.xlarge
+    BastionAmi:
+        Description: Bastion Amazon Machine Image
+        Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+        Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+        ConstraintDescription: Must be the name of an Amazon Machine Image
 
 # INTERFACE METADATA
 Metadata:
@@ -52,19 +72,29 @@ Metadata:
               Parameters:
                   - EnvironmentStackName
             - Label:
-                  default: Bastion Configuration
+                  default: SSH Configuration
               Parameters:
                   - SshCidr
                   - SshKey
+            - Label:
+                  default: Bastion Instance Configuration
+              Parameters:
+                  - BastionInstance
+                  - BastionAmi
         ParameterLabels:
             # ENVIRONMENT
             EnvironmentStackName:
                 default: Custom Environment Stack Name
-            # BASTION
+            # SSH
             SshCidr:
-                default: Bastion SSH CIDR block
+                default: SSH CIDR block
             SshKey:
-                default: Bastion SSH EC2 Key Pair
+                default: SSH EC2 Key Pair
+            # BASTION
+            BastionInstance:
+                default: EC2 Instance Type
+            BastionAmi:
+                default: EC2 AMI
 
 # AWS RESOURCES TO BE CREATED
 Resources:
@@ -83,6 +113,23 @@ Resources:
             IpProtocol: 6 # TCP
             FromPort: 22
             ToPort: 22
+
+    # endregion
+
+    #-------------------------------------------------------------------------------
+    # region BASTION EC2 INSTANCE
+
+    # BASTION EC2 INSTANCEEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+        InstanceType:
+            Ref: BastionInstance
+        SecurityGroups:
+            - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
+        KeyName:
+            Ref: SshKey
+        ImageId:
+            Ref: BastionAmi
 
     # endregion
 
