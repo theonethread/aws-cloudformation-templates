@@ -119,7 +119,7 @@ Resources:
     #-------------------------------------------------------------------------------
     # region BASTION EC2 INSTANCE
 
-    # BASTION EC2 INSTANCEEC2Instance:
+    # BASTION EC2 INSTANCE
     Type: AWS::EC2::Instance
     Properties:
         InstanceType:
