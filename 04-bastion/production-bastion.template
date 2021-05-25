@@ -168,3 +168,18 @@ Outputs:
         Export:
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, template-id]]
+    #BASTION
+    BastionInstanceId:
+        Description: Bastion Instance ID
+        Value:
+            Ref: BastionInstance
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, bastion-id]]
+    BastionInstancePublicIp:
+        Description: Bastion Instance public IP
+        Value:
+            Fn::GetAtt: BastionInstance.PublicIp
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, bastion-id]]
