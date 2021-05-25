@@ -199,6 +199,7 @@ Resources:
                           - Fn::If:
                                 - BastionDbResourceCreation
                                 - |-
+                                    - mysql
                                     - gcc
 
                                     runcmd:
