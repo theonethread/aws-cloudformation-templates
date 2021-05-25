@@ -65,7 +65,7 @@ Parameters:
         Type: String
         MinLength: 1
         MaxLength: 64
-        AllowedPattern: "/[a-zA-Z0-9\\-/]+"
+        AllowedPattern: "/([a-zA-Z0-9\\-/]+)?"
         ConstraintDescription: Must begin with a "/", and contain only alphanumeric characters, dash, and "/"
     # LISTENER
     Priority:

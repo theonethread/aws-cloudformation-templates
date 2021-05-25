@@ -595,7 +595,7 @@ Outputs:
             Fn::If: [CreateBastionIngress, "Yes", "No"]
         Export:
             Name:
-                Fn::Join: ["-", [Ref: AWS::StackName, rds-replicated]]
+                Fn::Join: ["-", [Ref: AWS::StackName, bastion-sg-ingress]]
     RdsReplicaCreated:
         Description: If a read replica was created for the MySQL RDS instance
         Value:
