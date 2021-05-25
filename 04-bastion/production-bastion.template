@@ -203,15 +203,16 @@ Resources:
                           - Fn::If:
                                 - BastionDbResourceCreation
                                 - |-
-                                    - mysql
                                     - gcc
+                                    - mariadb
 
                                     runcmd:
                                     - wget http://download.redis.io/redis-stable.tar.gz
                                     - tar xzf redis-stable.tar.gz
                                     - cd redis-stable
-                                    - make
-                                    - make install
+                                    - make distclean
+                                    - make redis-cli BUILD_TLS=yes
+                                    - install -m 755 src/redis-cli /usr/local/bin/
                                 - Ref: AWS::NoValue
                           - |-
 
