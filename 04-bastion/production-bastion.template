@@ -176,6 +176,8 @@ Resources:
                       - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
                   SubnetId:
                       Ref: BastionSubnet
+            # NOTE: multipart UserData, cloud-config.txt will run only at deployment, userdata.txt will run on every boot
+            # SEE: https://cloudinit.readthedocs.io/en/latest/topics/examples.html#yaml-examples
             UserData:
                 Fn::Base64:
                     Fn::Join:
@@ -192,6 +194,8 @@ Resources:
                               Content-Disposition: attachment; filename="cloud-config.txt"
 
                               #cloud-config
+                              package_update: true
+                              package_upgrade: true
                               cloud_final_modules:
                               - [scripts-user, always]
                               packages:
