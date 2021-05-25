@@ -41,7 +41,7 @@ Parameters:
     # SSH SETTINGS
     SshCidr:
         Description: The IP address CIDR block range that is allowed to SSH into bastion EC2 instance
-        Type": String
+        Type: String
         MinLength: 9
         MaxLength: 18
         AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|1[0-9]|2[0-9]|3[0-2]))$
@@ -52,7 +52,7 @@ Parameters:
         Type: AWS::EC2::KeyPair::KeyName
         ConstraintDescription: Must be the name of an existing EC2 Key Pair
     # BASTION INSTANCE
-    BastionInstance:
+    BastionInstanceType:
         Description: Bastion Instance Type
         Type: String
         Default: t3.micro
@@ -69,15 +69,17 @@ Parameters:
     BastionAmi:
         Description: Bastion Amazon Machine Image
         Type: AWS::EC2::Image::Id
-        Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+        Default: ami-050fdc53cf6ba8f7f
         ConstraintDescription: Must be the name of an Amazon Machine Image
     BastionSubnet:
         Description: Existing Custom Environment public Subnet to place Bastion Instance in
         Type: String
         AllowedValues:
-            Fn::Split:
-                - ","
-                - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, subnet-all-pub-id]] }
+            - "01"
+            - "02"
+            - "03"
+        Default: "01"
+        ConstraintDescription: Must provide value
     BastionDbResourceCreation:
         Description: If Bastion DataBase resources should be installed
         Type: String
@@ -103,7 +105,7 @@ Metadata:
             - Label:
                   default: Bastion Instance Configuration
               Parameters:
-                  - BastionInstance
+                  - BastionInstanceType
                   - BastionAmi
                   - BastionSubnet
                   - BastionDbResourceCreation
@@ -117,7 +119,7 @@ Metadata:
             SshKey:
                 default: SSH EC2 Key Pair
             # BASTION
-            BastionInstance:
+            BastionInstanceType:
                 default: EC2 Instance Type
             BastionAmi:
                 default: EC2 AMI
@@ -159,12 +161,8 @@ Resources:
         Type: AWS::EC2::Instance
         Properties:
             InstanceType:
-                Ref: BastionInstance
+                Ref: BastionInstanceType
             Monitoring: false
-            SecurityGroupIds:
-                - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
-            SubnetId:
-                Ref: BastionSubnet
             KeyName:
                 Ref: SshKey
             ImageId:
@@ -175,7 +173,8 @@ Resources:
                   GroupSet:
                       - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
                   SubnetId:
-                      Ref: BastionSubnet
+                      Fn::ImportValue:
+                          Fn::Join: ["-", [Ref: EnvironmentStackName, subnet, Ref: BastionSubnet, pub-id]]
             # NOTE: multipart UserData, cloud-config.txt will run only at deployment, user-data.txt will run on every boot
             # SEE: https://cloudinit.readthedocs.io/en/latest/topics/examples.html#yaml-examples
             UserData:
@@ -201,9 +200,10 @@ Resources:
                               packages:
                               - mc
                           - Fn::If:
-                                - BastionDbResourceCreation
+                                - CreateBastionDbResource
                                 - |-
                                     - gcc
+                                    - openssl-devel
                                     - mariadb
 
                                     runcmd:
@@ -224,11 +224,11 @@ Resources:
                               Content-Disposition: attachment; filename="user-data.txt"
 
                               #!/bin/bash
-                          - Fn:Join:
+                          - Fn::Join:
                                 - ""
                                 - - export AWS_PRIV_DNS=
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-priv-dns]] }
-                          - Fn:Join:
+                          - Fn::Join:
                                 - ""
                                 - - export AWS_HOST=
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-pub-host-dns]] }
