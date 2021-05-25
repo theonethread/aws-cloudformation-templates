@@ -227,4 +227,4 @@ Outputs:
             Fn::GetAtt: BastionInstance.PublicIp
         Export:
             Name:
-                Fn::Join: ["-", [Ref: AWS::StackName, bastion-id]]
+                Fn::Join: ["-", [Ref: AWS::StackName, bastion-ip]]
