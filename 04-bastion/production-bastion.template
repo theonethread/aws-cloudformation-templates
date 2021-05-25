@@ -178,6 +178,8 @@ Resources:
                               #cloud-config
                               cloud_final_modules:
                               - [scripts-user, always]
+                              packages:
+                              - mc
 
                               --//
                               Content-Type: text/x-shellscript; charset="us-ascii"
