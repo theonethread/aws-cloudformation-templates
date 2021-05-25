@@ -190,13 +190,11 @@ Resources:
                               Content-Type: text/cloud-config; charset="us-ascii"
                               MIME-Version: 1.0
                               Content-Transfer-Encoding: 7bit
-                              Content-Disposition: attachment; filename="cloud-config.txt"
+                              Content-Disposition: attachment; filename="cloud-config.yml"
 
                               #cloud-config
                               package_update: true
                               package_upgrade: true
-                              cloud_final_modules:
-                              - [scripts-user, always]
                               packages:
                               - mc
                           - Fn::If:
@@ -207,8 +205,10 @@ Resources:
                                     - mariadb
 
                                     runcmd:
+                                    - cd /root
                                     - wget http://download.redis.io/redis-stable.tar.gz
                                     - tar xzf redis-stable.tar.gz
+                                    - rm redis-stable.tar.gz
                                     - cd redis-stable
                                     - make distclean
                                     - make redis-cli BUILD_TLS=yes
@@ -221,18 +221,20 @@ Resources:
                               Content-Type: text/x-shellscript; charset="us-ascii"
                               MIME-Version: 1.0
                               Content-Transfer-Encoding: 7bit
-                              Content-Disposition: attachment; filename="user-data.txt"
+                              Content-Disposition: attachment; filename="user-data.sh"
 
                               #!/bin/bash
+                              cat <<EOT>> /etc/environment
                           - Fn::Join:
                                 - ""
-                                - - export AWS_PRIV_DNS=
+                                - - AWS_PRIV_DNS=
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-priv-dns]] }
                           - Fn::Join:
                                 - ""
-                                - - export AWS_HOST=
+                                - - AWS_HOST=
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-pub-host-dns]] }
                           - |-
+                              <<EOT>>
 
                               --//
             Tags:
