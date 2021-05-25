@@ -139,23 +139,30 @@ Resources:
     # region BASTION EC2 INSTANCE
 
     # BASTION EC2 INSTANCE
-    Type: AWS::EC2::Instance
-    Properties:
-        InstanceType:
-            Ref: BastionInstance
-        SecurityGroupIds:
-            - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
-        KeyName:
-            Ref: SshKey
-        ImageId:
-            Ref: BastionAmi
-        NetworkInterfaces:
-            - DeviceIndex: 0
-              AssociatePublicIpAddress: true
-              GroupSet:
-                  - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
-              SubnetId:
-                  Ref: BastionSubnet
+    BastionInstance:
+        Type: AWS::EC2::Instance
+        Properties:
+            InstanceType:
+                Ref: BastionInstance
+            SecurityGroupIds:
+                - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
+            SubnetId:
+                Ref: BastionSubnet
+            KeyName:
+                Ref: SshKey
+            ImageId:
+                Ref: BastionAmi
+            NetworkInterfaces:
+                - DeviceIndex: 0
+                  AssociatePublicIpAddress: true
+                  GroupSet:
+                      - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, bastion-sg-id]] }
+                  SubnetId:
+                      Ref: BastionSubnet
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, bastion-instance]]
 
     # endregion
 
