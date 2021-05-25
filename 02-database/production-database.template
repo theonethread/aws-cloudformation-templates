@@ -42,6 +42,14 @@ Parameters:
         MaxLength: 32
         AllowedPattern: "[a-z][a-z0-9\\-]+"
         ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
+    BastionIngressCreation:
+        Description: If Bastion Security Group should have access to databases
+        Type: String
+        AllowedValues:
+            - "No"
+            - "Yes"
+        Default: "Yes"
+        ConstraintDescription: Must provide value
     # RDS
     RdsDatabaseName:
         Description: |-
@@ -181,6 +189,7 @@ Metadata:
                   default: Environment Configuration
               Parameters:
                   - EnvironmentStackName
+                  - BastionIngressCreation
             - Label:
                   default: RDS (MySQL) Database Configuration
               Parameters:
@@ -208,6 +217,8 @@ Metadata:
             # ENVIRONMENT
             EnvironmentStackName:
                 default: Custom Environment Stack Name
+            BastionIngressCreation:
+                default: Bastion Database Access
             # RDS
             RdsDatabaseName:
                 default: Database Name
@@ -241,6 +252,8 @@ Metadata:
 
 # CONDITIONS
 Conditions:
+    CreateBastionIngress:
+        Fn::Equals: [Ref: BastionIngressCreation, "Yes"]
     CreateRdsReadReplica:
         Fn::Equals: [Ref: RdsReadReplicaCreation, "Yes"]
     CreateRdsMultiAz:
@@ -299,6 +312,7 @@ Resources:
             FromPort: 3306
             ToPort: 3306
     RdsSecurityGroupIngressBastionMysql:
+        Condition: CreateBastionIngress
         Type: AWS::EC2::SecurityGroupIngress
         Properties:
             Description: Ingress form bastion EC2 instances MySQL
@@ -481,6 +495,7 @@ Resources:
             FromPort: 6379
             ToPort: 6379
     CacheSecurityGroupIngressBastionRedis:
+        Condition: CreateBastionIngress
         Type: AWS::EC2::SecurityGroupIngress
         Properties:
             Description: Ingress form bastion EC2 instances Redis
