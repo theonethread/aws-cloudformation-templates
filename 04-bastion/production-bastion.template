@@ -38,6 +38,15 @@ Parameters:
         MaxLength: 32
         AllowedPattern: "[a-z][a-z0-9\\-]+"
         ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
+    DatabaseStackName:
+        Description: |-
+            Name of an existing custom database stack
+            (optional, minimum: 5, maximum: 32)
+        Type: String
+        MinLength: 0
+        MaxLength: 32
+        AllowedPattern: "[a-z][a-z0-9\\-]+"
+        ConstraintDescription: Optional value
     # SSH SETTINGS
     SshCidr:
         Description: The IP address CIDR block range that is allowed to SSH into bastion EC2 instance
@@ -97,6 +106,7 @@ Metadata:
                   default: Environment Configuration
               Parameters:
                   - EnvironmentStackName
+                  - DatabaseStackName
             - Label:
                   default: SSH Configuration
               Parameters:
@@ -113,6 +123,8 @@ Metadata:
             # ENVIRONMENT
             EnvironmentStackName:
                 default: Custom Environment Stack Name
+            DatabaseStackName:
+                default: Custom Database Stack Name
             # SSH
             SshCidr:
                 default: SSH CIDR block
@@ -130,6 +142,8 @@ Metadata:
 
 # CONDITIONS
 Conditions:
+    NoDatabaseStack:
+        Fn::Equals: [Ref: DatabaseStackName, ""]
     CreateBastionDbResource:
         Fn::Equals: [Ref: BastionDbResourceCreation, "Yes"]
 
@@ -227,12 +241,43 @@ Resources:
                               cat <<EOT>> /etc/environment
                           - Fn::Join:
                                 - ""
-                                - - AWS_PRIV_DNS=
+                                - - AWS_ALB_DNS=
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-priv-dns]] }
                           - Fn::Join:
                                 - ""
-                                - - AWS_HOST_DNS=
+                                - - AWS_ALB_HOST=
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-pub-host-dns]] }
+                          - Fn::If:
+                                - NoDatabaseStack
+                                - Ref: AWS::NoValue
+                                - Fn::Join:
+                                      - |+
+
+                                      - - Fn::Join:
+                                              - ""
+                                              - - AWS_RDS_DNS=
+                                                - Fn::ImportValue:
+                                                      Fn::Join: ["-", [Ref: DatabaseStackName, rds-master-db-ep]]
+                                        - Fn::Join:
+                                              - ""
+                                              - - AWS_RDS_PORT=
+                                                - Fn::ImportValue:
+                                                      Fn::Join: ["-", [Ref: DatabaseStackName, rds-master-db-port]]
+                                        - Fn::Join:
+                                              - ""
+                                              - - AWS_RDS_DB=
+                                                - Fn::ImportValue:
+                                                      Fn::Join: ["-", [Ref: DatabaseStackName, rds-master-db-id]]
+                                        - Fn::Join:
+                                              - ""
+                                              - - AWS_CACHE_DNS=
+                                                - Fn::ImportValue:
+                                                      Fn::Join: ["-", [Ref: DatabaseStackName, cache-rg-primary-ep]]
+                                        - Fn::Join:
+                                              - ""
+                                              - - AWS_CACHE_PORT=
+                                                - Fn::ImportValue:
+                                                      Fn::Join: ["-", [Ref: DatabaseStackName, cache-rg-primary-port]]
                           - |-
                               <<EOT>>
 
@@ -253,7 +298,21 @@ Outputs:
         Export:
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, template-id]]
-    #BASTION
+    # BASTION
+    BastionDatabaseStackConnected:
+        Description: If Bastion is connected to a Database Stack
+        Value:
+            Fn::If: [NoDatabaseStack, "No", "Yes"]
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, bastion-db-stack]]
+    BastionDbResourceCreated:
+        Description: If Bastion database resources were installed
+        Value:
+            Fn::If: [CreateBastionDbResource, "Yes", "No"]
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, bastion-db-resource]]
     BastionInstanceId:
         Description: Bastion Instance ID
         Value:

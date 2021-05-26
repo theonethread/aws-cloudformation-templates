@@ -61,11 +61,11 @@ Parameters:
         AllowedPattern: "[a-z][a-z\\-]+"
         ConstraintDescription: Must begin with a letter, and contain only lowercase alphanumeric characters and dash
     RdsUser:
+        NoEcho: true
         Description: |-
             Admin account username for MySQL RDS
             (Minimum: 5, maximum: 16)
         Type: String
-        Default: admin
         MinLength: 5
         MaxLength: 16
         AllowedPattern: "[a-z][a-z\\-]+"
