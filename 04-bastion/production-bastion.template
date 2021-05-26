@@ -175,7 +175,7 @@ Resources:
                   SubnetId:
                       Fn::ImportValue:
                           Fn::Join: ["-", [Ref: EnvironmentStackName, subnet, Ref: BastionSubnet, pub-id]]
-            # NOTE: multipart UserData, cloud-config.txt will run only at deployment, user-data.txt will run on every boot
+            # NOTE: multipart user data
             # SEE: https://cloudinit.readthedocs.io/en/latest/topics/examples.html#yaml-examples
             UserData:
                 Fn::Base64:
@@ -231,7 +231,7 @@ Resources:
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-priv-dns]] }
                           - Fn::Join:
                                 - ""
-                                - - AWS_HOST=
+                                - - AWS_HOST_DNS=
                                   - Fn::ImportValue: { Fn::Join: ["-", [Ref: EnvironmentStackName, alb-pub-host-dns]] }
                           - |-
                               <<EOT>>
