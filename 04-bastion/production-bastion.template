@@ -265,11 +265,6 @@ Resources:
                                                       Fn::Join: ["-", [Ref: DatabaseStackName, rds-master-db-port]]
                                         - Fn::Join:
                                               - ""
-                                              - - AWS_RDS_DB=
-                                                - Fn::ImportValue:
-                                                      Fn::Join: ["-", [Ref: DatabaseStackName, rds-master-db-id]]
-                                        - Fn::Join:
-                                              - ""
                                               - - AWS_CACHE_DNS=
                                                 - Fn::ImportValue:
                                                       Fn::Join: ["-", [Ref: DatabaseStackName, cache-rg-primary-ep]]
