@@ -76,10 +76,10 @@ Parameters:
             - r5.large
             - r5.xlarge
     BastionAmi:
-        Description: Bastion Amazon Machine Image
-        Type: AWS::EC2::Image::Id
-        Default: ami-050fdc53cf6ba8f7f
-        ConstraintDescription: Must be the name of an Amazon Machine Image
+        Description: Bastion Amazon Machine Image SSM pointer
+        Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+        Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+        ConstraintDescription: Must be the name of an Amazon Machine Image SSM pointer
     BastionSubnet:
         Description: Existing Custom Environment public Subnet to place Bastion Instance in
         Type: String
