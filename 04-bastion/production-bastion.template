@@ -124,7 +124,7 @@ Metadata:
             EnvironmentStackName:
                 default: Custom Environment Stack Name
             DatabaseStackName:
-                default: Custom Database Stack Name
+                default: Custom Database Stack Name (optional)
             # SSH
             SshCidr:
                 default: SSH CIDR block
