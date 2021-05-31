@@ -81,8 +81,20 @@ Parameters:
         AllowedValues:
             - "No"
             - "Yes"
-        Default: "No"
+        Default: "Yes"
         ConstraintDescription: Must provide value
+    NatPublicAllocationId1:
+        Description: Existing EIP Allocation ID to use with 1st NAT gateway
+        Type: String
+        ConstraintDescription: Optional value
+    NatPublicAllocationId2:
+        Description: Existing EIP Allocation ID to use with 2nd NAT gateway
+        Type: String
+        ConstraintDescription: Optional value
+    NatPublicAllocationId3:
+        Description: Existing EIP Allocation ID to use with 3rd NAT gateway
+        Type: String
+        ConstraintDescription: Optional value
     EbVpcEndpointsCreation:
         Description: |-
             If VPC Endpoints should be created for using private subnets with Elastic Beanstalk
@@ -132,6 +144,9 @@ Metadata:
                   default: Communication Configuration
               Parameters:
                   - NatGatewayCreation
+                  - NatPublicAllocationId1
+                  - NatPublicAllocationId2
+                  - NatPublicAllocationId3
                   - EbVpcEndpointsCreation
             - Label:
                   default: Load Balancer & DNS Configuration
@@ -153,6 +168,12 @@ Metadata:
             # COMMUNICATION
             NatGatewayCreation:
                 default: Create NAT gateway for private subnets
+            NatPublicAllocationId1:
+                default: Elastic IP Allocation Id 1 (optional)
+            NatPublicAllocationId2:
+                default: Elastic IP Allocation Id 2 (optional)
+            NatPublicAllocationId3:
+                default: Elastic IP Allocation Id 3 (optional)
             EbVpcEndpointsCreation:
                 default: Create VPC Endpoints for Elastic Beanstalk
             # LOAD BALANCER & DNS
@@ -173,8 +194,21 @@ Conditions:
         Fn::Equals: [Ref: NatGatewayCreation, "Yes"]
     Create3rdNatGateway:
         Fn::And:
-            - Fn::Equals: [Ref: AvailabilityZoneCount, 3]
-            - Fn::Equals: [Ref: NatGatewayCreation, "Yes"]
+            - CreateNatGateway
+            - Create3rdSubnet
+    CreateNatPublicIp1:
+        Fn::And:
+            - CreateNatGateway
+            - Fn::Equals: [Ref: NatPublicAllocationId1, ""]
+    CreateNatPublicIp2:
+        Fn::And:
+            - CreateNatGateway
+            - Fn::Equals: [Ref: NatPublicAllocationId2, ""]
+    CreateNatPublicIp3:
+        Fn::And:
+            - CreateNatGateway
+            - Create3rdSubnet
+            - Fn::Equals: [Ref: NatPublicAllocationId3, ""]
     CreateEbVpcEndpoints:
         Fn::Equals: [Ref: EbVpcEndpointsCreation, "Yes"]
 
@@ -345,8 +379,18 @@ Resources:
     # region PRIVATE ROUTING
 
     # PRIVATE NAT GATEWAYS
+    NatPublicIp1:
+        Condition: CreateNatPublicIp1
+        Type: AWS::EC2::EIP
+        DependsOn: CustomVpc
+        Properties:
+            Domain: vpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-01]]
     NatGateway1:
-        Condition: CreateNatGateway
+        Condition: CreateNatPublicIp1
         Type: AWS::EC2::NatGateway
         DependsOn: NatPublicIp1
         Properties:
@@ -358,8 +402,21 @@ Resources:
                 - Key: Name
                   Value:
                       Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-01]]
-    NatPublicIp1:
+    NatGateway1External:
         Condition: CreateNatGateway
+        Type: AWS::EC2::NatGateway
+        Properties:
+            AllocationId:
+                Reef: NatPublicAllocationId1
+            SubnetId:
+                Ref: PublicSubnet1
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-01]]
+
+    NatPublicIp2:
+        Condition: CreateNatPublicIp2
         Type: AWS::EC2::EIP
         DependsOn: CustomVpc
         Properties:
@@ -367,10 +424,9 @@ Resources:
             Tags:
                 - Key: Name
                   Value:
-                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-01]]
-
+                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-02]]
     NatGateway2:
-        Condition: CreateNatGateway
+        Condition: CreateNatPublicIp2
         Type: AWS::EC2::NatGateway
         DependsOn: NatPublicIp2
         Properties:
@@ -382,8 +438,21 @@ Resources:
                 - Key: Name
                   Value:
                       Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-02]]
-    NatPublicIp2:
+    NatGateway2External:
         Condition: CreateNatGateway
+        Type: AWS::EC2::NatGateway
+        Properties:
+            AllocationId:
+                Reef: NatPublicAllocationId2
+            SubnetId:
+                Ref: PublicSubnet2
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-02]]
+
+    NatPublicIp3:
+        Condition: CreateNatPublicIp3
         Type: AWS::EC2::EIP
         DependsOn: CustomVpc
         Properties:
@@ -391,10 +460,9 @@ Resources:
             Tags:
                 - Key: Name
                   Value:
-                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-02]]
-
+                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-03]]
     NatGateway3:
-        Condition: Create3rdNatGateway
+        Condition: CreateNatPublicIp3
         Type: AWS::EC2::NatGateway
         DependsOn: NatPublicIp3
         Properties:
@@ -406,16 +474,18 @@ Resources:
                 - Key: Name
                   Value:
                       Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-03]]
-    NatPublicIp3:
+    NatGateway3External:
         Condition: Create3rdNatGateway
-        Type: AWS::EC2::EIP
-        DependsOn: CustomVpc
+        Type: AWS::EC2::NatGateway
         Properties:
-            Domain: vpc
+            AllocationId:
+                Reef: NatPublicAllocationId3
+            SubnetId:
+                Ref: PublicSubnet3
             Tags:
                 - Key: Name
                   Value:
-                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-03]]
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-03]]
 
     # PRIVATE ROUTING
     PrivateRouteTable1:
@@ -435,7 +505,7 @@ Resources:
                 Ref: PrivateRouteTable1
             DestinationCidrBlock: 0.0.0.0/0
             NatGatewayId:
-                Ref: NatGateway1
+                Fn::If: [CreateNatPublicIp1, Ref: NatGateway1, Ref: NatGateway1External]
 
     PrivateRouteTable2:
         Type: AWS::EC2::RouteTable
@@ -454,10 +524,10 @@ Resources:
                 Ref: PrivateRouteTable2
             DestinationCidrBlock: 0.0.0.0/0
             NatGatewayId:
-                Ref: NatGateway2
+                Fn::If: [CreateNatPublicIp2, Ref: NatGateway2, Ref: NatGateway2External]
 
     PrivateRouteTable3:
-        Condition: Create3rdNatGateway
+        Condition: Create3rdSubnet
         Type: AWS::EC2::RouteTable
         Properties:
             VpcId:
@@ -474,7 +544,7 @@ Resources:
                 Ref: PrivateRouteTable3
             DestinationCidrBlock: 0.0.0.0/0
             NatGatewayId:
-                Ref: NatGateway3
+                Fn::If: [CreateNatPublicIp3, Ref: NatGateway3, Ref: NatGateway3External]
 
     # endregion
 
