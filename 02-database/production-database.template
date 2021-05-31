@@ -139,11 +139,11 @@ Parameters:
         NoEcho: true
         Description: |-
             Auth Token for Redis ElastiCache
-            (Minimum: 16, maximum: 40)
+            (Optional, minimum: 16, maximum: 40)
         Type: String
-        MinLength: 16
-        MaxLength: 40
-        AllowedPattern: "[a-zA-Z0-9]+"
+        # MinLength: 16
+        # MaxLength: 40
+        AllowedPattern: "[a-zA-Z0-9]*"
         ConstraintDescription: Must contain only alphanumeric characters
     CacheInstance:
         Description: |-
@@ -240,7 +240,7 @@ Metadata:
                 default: Existing RDS MySQL Parameter Group (optional)
             # CACHE
             CachePass:
-                default: Auth Token
+                default: Auth Token (optional)
             CacheInstance:
                 default: Cache EC2 Instance(s)
             CacheMultiAzCreation:
@@ -260,6 +260,8 @@ Conditions:
         Fn::Equals: [Ref: RdsMultiAzCreation, "Yes"]
     NoRdsParameterGroup:
         Fn::Equals: [Ref: RdsParameterGroup, ""]
+    NoCacheTls:
+        Fn::Equals: [Ref: CachePass, ""]
     CreateCacheMultiAz:
         Fn::Equals: [Ref: CacheMultiAzCreation, "Yes"]
     NoCacheParameterGroup:
@@ -548,10 +550,17 @@ Resources:
             NumCacheClusters:
                 Ref: CacheNumClusters
             AtRestEncryptionEnabled: false
-            TransitEncryptionEnabled: true
+            TransitEncryptionEnabled:
+                Fn::If:
+                    - NoCacheTls
+                    - false
+                    - true
             # NOTE: needs TransitEncryptionEnabled
             AuthToken:
-                Ref: CachePass
+                Fn::If:
+                    - NoCacheTls
+                    - Ref: AWS::NoValue
+                    - Ref: CachePass
             SnapshotRetentionLimit: 0
             AutomaticFailoverEnabled: true
             ReplicationGroupId:

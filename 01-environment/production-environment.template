@@ -340,21 +340,21 @@ Resources:
     #-------------------------------------------------------------------------------
     # region PRIVATE ROUTING
 
-    # PRIVATE NAT GATEWAY
-    NatGateway:
+    # PRIVATE NAT GATEWAYS
+    NatGateway1:
         Condition: CreateNatGateway
         Type: AWS::EC2::NatGateway
-        DependsOn: NatPublicIP
+        DependsOn: NatPublicIp1
         Properties:
             AllocationId:
-                Fn::GetAtt: NatPublicIP.AllocationId
+                Fn::GetAtt: NatPublicIp1.AllocationId
             SubnetId:
                 Ref: PublicSubnet1
             Tags:
                 - Key: Name
                   Value:
-                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat]]
-    NatPublicIP:
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-01]]
+    NatPublicIp1:
         Condition: CreateNatGateway
         Type: AWS::EC2::EIP
         DependsOn: CustomVpc
@@ -363,10 +363,64 @@ Resources:
             Tags:
                 - Key: Name
                   Value:
-                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat]]
+                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-01]]
+
+    NatGateway2:
+        Condition: CreateNatGateway
+        Type: AWS::EC2::NatGateway
+        DependsOn: NatPublicIp2
+        Properties:
+            AllocationId:
+                Fn::GetAtt: NatPublicIp2.AllocationId
+            SubnetId:
+                Ref: PublicSubnet2
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-02]]
+    NatPublicIp2:
+        Condition: CreateNatGateway
+        Type: AWS::EC2::EIP
+        DependsOn: CustomVpc
+        Properties:
+            Domain: vpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-02]]
+
+    NatGateway3:
+        Condition:
+            Fn::And:
+                - Create3rdSubnet
+                - CreateNatGateway
+        Type: AWS::EC2::NatGateway
+        DependsOn: NatPublicIp3
+        Properties:
+            AllocationId:
+                Fn::GetAtt: NatPublicIp3.AllocationId
+            SubnetId:
+                Ref: PublicSubnet3
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-03]]
+    NatPublicIp3:
+        Condition:
+            Fn::And:
+                - Create3rdSubnet
+                - CreateNatGateway
+        Type: AWS::EC2::EIP
+        DependsOn: CustomVpc
+        Properties:
+            Domain: vpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-03]]
 
     # PRIVATE ROUTING
-    PrivateRouteTable:
+    PrivateRouteTable1:
         Type: AWS::EC2::RouteTable
         Properties:
             VpcId:
@@ -374,16 +428,61 @@ Resources:
             Tags:
                 - Key: Name
                   Value:
-                      Fn::Join: ["-", [Ref: AWS::StackName, table-priv]]
-    PrivateRoute:
+                      Fn::Join: ["-", [Ref: AWS::StackName, table-priv-01]]
+    PrivateRoute1:
         Condition: CreateNatGateway
         Type: AWS::EC2::Route
         Properties:
             RouteTableId:
-                Ref: PrivateRouteTable
+                Ref: PrivateRouteTable1
             DestinationCidrBlock: 0.0.0.0/0
             NatGatewayId:
-                Ref: NatGateway
+                Ref: NatGateway1
+
+    PrivateRouteTable2:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, table-priv-02]]
+    PrivateRoute2:
+        Condition: CreateNatGateway
+        Type: AWS::EC2::Route
+        Properties:
+            RouteTableId:
+                Ref: PrivateRouteTable2
+            DestinationCidrBlock: 0.0.0.0/0
+            NatGatewayId:
+                Ref: NatGateway2
+
+    PrivateRouteTable3:
+        Condition:
+            Fn::And:
+                - Create3rdSubnet
+                - CreateNatGateway
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId:
+                Ref: CustomVpc
+            Tags:
+                - Key: Name
+                  Value:
+                      Fn::Join: ["-", [Ref: AWS::StackName, table-priv-03]]
+    PrivateRoute3:
+        Condition:
+            Fn::And:
+                - Create3rdSubnet
+                - CreateNatGateway
+        Type: AWS::EC2::Route
+        Properties:
+            RouteTableId:
+                Ref: PrivateRouteTable3
+            DestinationCidrBlock: 0.0.0.0/0
+            NatGatewayId:
+                Ref: NatGateway3
 
     # endregion
 
@@ -585,14 +684,14 @@ Resources:
             SubnetId:
                 Ref: PrivateSubnet1
             RouteTableId:
-                Ref: PrivateRouteTable
+                Ref: PrivateRouteTable1
     PrivateSubnet2RouteTableAssociation:
         Type: AWS::EC2::SubnetRouteTableAssociation
         Properties:
             SubnetId:
                 Ref: PrivateSubnet2
             RouteTableId:
-                Ref: PrivateRouteTable
+                Ref: PrivateRouteTable2
     PrivateSubnet3RouteTableAssociation:
         Condition: Create3rdSubnet
         Type: AWS::EC2::SubnetRouteTableAssociation
@@ -600,7 +699,7 @@ Resources:
             SubnetId:
                 Ref: PrivateSubnet3
             RouteTableId:
-                Ref: PrivateRouteTable
+                Ref: PrivateRouteTable3
 
     # endregion
 
@@ -1156,13 +1255,28 @@ Outputs:
         Export:
             Name:
                 Fn::Join: ["-", [Ref: AWS::StackName, rtb-pub-id]]
-    PrivateRouteTableId:
-        Description: Private Route Table ID
+    PrivateRouteTable1Id:
+        Description: Private Route Table 1 ID
         Value:
-            Ref: PrivateRouteTable
+            Ref: PrivateRouteTable1
         Export:
             Name:
-                Fn::Join: ["-", [Ref: AWS::StackName, rtb-priv-id]]
+                Fn::Join: ["-", [Ref: AWS::StackName, rtb-01-priv-id]]
+    PrivateRouteTable2Id:
+        Description: Private Route Table 2 ID
+        Value:
+            Ref: PrivateRouteTable2
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rtb-02-priv-id]]
+    PrivateRouteTable3Id:
+        Condition: Create3rdSubnet
+        Description: Private Route Table 3 ID
+        Value:
+            Ref: PrivateRouteTable3
+        Export:
+            Name:
+                Fn::Join: ["-", [Ref: AWS::StackName, rtb-03-priv-id]]
     # PUBLIC SUBNETS
     PublicSubnet1Id:
         Description: Public Subnet 1 ID
