@@ -171,6 +171,10 @@ Conditions:
         Fn::Equals: [Ref: AvailabilityZoneCount, 3]
     CreateNatGateway:
         Fn::Equals: [Ref: NatGatewayCreation, "Yes"]
+    Create3rdNatGateway:
+        Fn::And:
+            - Fn::Equals: [Ref: AvailabilityZoneCount, 3]
+            - Fn::Equals: [Ref: NatGatewayCreation, "Yes"]
     CreateEbVpcEndpoints:
         Fn::Equals: [Ref: EbVpcEndpointsCreation, "Yes"]
 
@@ -390,10 +394,7 @@ Resources:
                       Fn::Join: ["-", [Ref: AWS::StackName, eip-nat-02]]
 
     NatGateway3:
-        Condition:
-            Fn::And:
-                - Create3rdSubnet
-                - CreateNatGateway
+        Condition: Create3rdNatGateway
         Type: AWS::EC2::NatGateway
         DependsOn: NatPublicIp3
         Properties:
@@ -406,10 +407,7 @@ Resources:
                   Value:
                       Fn::Join: ["-", [Ref: AWS::StackName, gateway-nat-03]]
     NatPublicIp3:
-        Condition:
-            Fn::And:
-                - Create3rdSubnet
-                - CreateNatGateway
+        Condition: Create3rdNatGateway
         Type: AWS::EC2::EIP
         DependsOn: CustomVpc
         Properties:
@@ -459,10 +457,7 @@ Resources:
                 Ref: NatGateway2
 
     PrivateRouteTable3:
-        Condition:
-            Fn::And:
-                - Create3rdSubnet
-                - CreateNatGateway
+        Condition: Create3rdNatGateway
         Type: AWS::EC2::RouteTable
         Properties:
             VpcId:
@@ -472,10 +467,7 @@ Resources:
                   Value:
                       Fn::Join: ["-", [Ref: AWS::StackName, table-priv-03]]
     PrivateRoute3:
-        Condition:
-            Fn::And:
-                - Create3rdSubnet
-                - CreateNatGateway
+        Condition: Create3rdNatGateway
         Type: AWS::EC2::Route
         Properties:
             RouteTableId:
@@ -1179,7 +1171,9 @@ Resources:
             VpcId:
                 Ref: CustomVpc
             RouteTableIds:
-                - Ref: PrivateRouteTable
+                - Ref: PrivateRouteTable1
+                - Ref: PrivateRouteTable2
+                - Fn::If: [Create3rdSubnet, Ref: PrivateRouteTable3, Ref: AWS::NoValue]
             ServiceName:
                 Fn::Join: [".", [com.amazonaws, Ref: AWS::Region, s3]]
 
