@@ -407,7 +407,7 @@ Resources:
         Type: AWS::EC2::NatGateway
         Properties:
             AllocationId:
-                Reef: NatPublicAllocationId1
+                Ref: NatPublicAllocationId1
             SubnetId:
                 Ref: PublicSubnet1
             Tags:
@@ -443,7 +443,7 @@ Resources:
         Type: AWS::EC2::NatGateway
         Properties:
             AllocationId:
-                Reef: NatPublicAllocationId2
+                Ref: NatPublicAllocationId2
             SubnetId:
                 Ref: PublicSubnet2
             Tags:
@@ -479,7 +479,7 @@ Resources:
         Type: AWS::EC2::NatGateway
         Properties:
             AllocationId:
-                Reef: NatPublicAllocationId3
+                Ref: NatPublicAllocationId3
             SubnetId:
                 Ref: PublicSubnet3
             Tags:
