@@ -14,6 +14,7 @@
 # - admin-vpc-flow-logs (S3 Bucket, optional for VPC Flow Logs creation)
 # - Route 53 Hosted Zone for domain name (configurable)
 # - SSL Certificate for domain name (configurable)
+# - Elastic IP addresses for use with NAT Gateways (optional, configurable)
 
 # NOTE:
 # The NAT Gateway, Application Load Balancers, and VPC Interface Endpoints all have an hourly price, which are billed even if
