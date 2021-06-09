@@ -56,7 +56,7 @@ Parameters:
         Type: String
         MinLength: 5
         MaxLength: 32
-        AllowedPattern: "[a-z0-9]+"
+        AllowedPattern: "[a-z0-9\\-]+"
         ConstraintDescription: Must begin with a "/", and contain only alphanumeric characters, dash, and "/"
     HealthCheckPath:
         Description: |-
