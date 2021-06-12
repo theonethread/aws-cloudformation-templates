@@ -160,6 +160,10 @@ Resources:
                 - Field: path-pattern
                   Values:
                       - Fn::Join: ["", [/, Ref: PathSegment, /*]]
+                # - Field: source-ip
+                #   SourceIpConfig:
+                #       Values:
+                #           - 0.0.0.0/0
             Actions:
                 - Type: forward
                   TargetGroupArn:

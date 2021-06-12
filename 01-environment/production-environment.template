@@ -876,6 +876,17 @@ Resources:
             IpProtocol: 6 # TCP
             FromPort: 443
             ToPort: 443
+    # NOTE: for HTTPS redirecting
+    PublicAlbSecurityGroupIngressAllHttp:
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+            Description: Ingress form all HTTP
+            GroupId:
+                Ref: PublicAlbSecurityGroup
+            CidrIp: 0.0.0.0/0
+            IpProtocol: 6 # TCP
+            FromPort: 80
+            ToPort: 80
     PublicAlbSecurityGroupIngressVpcAll:
         Type: AWS::EC2::SecurityGroupIngress
         Properties:
